@@ -31,3 +31,18 @@ Fifteen issues found in the planner and fixed. Figures are from the built-in exa
 | 13 | Stock freshness used the upload date | Upload asks for the date the stock was counted |
 | 14 | Placeholder channel costs looked final | Each channel has a finance-confirmed flag; unconfirmed channels are flagged |
 | 15 | Nobody owned acting on the daily lists | "Today's run" sign-off: stock by 10:00, make list by 11:00, dispatch by 15:00, recording who and when |
+
+## Code review, November 2026
+
+| # | Bug | Fix |
+|---|---|---|
+| 16 | A second quick edit to the same shared data was refused as "changed by someone else" and lost | A save is refused only when the stored version is one this browser has never seen |
+| 17 | An orders file from one source deleted other channels' orders for the same dates | Only the channels in the file are replaced |
+| 18 | A stock file with some locations wiped the others, including the warehouse | Only the locations in the file are replaced |
+| 19 | Unknown channels and warehouses (e.g. "Ajio", "Bhiwandi Warehouse") became fake stock-holding stores | New channels ship from the warehouse; warehouse names are recognised anywhere in the text |
+| 20 | An invalid "ignore order status" pattern crashed every orders upload | Falls back to the default pattern with a message |
+| 21 | Channel correlation was measured on days with sale spikes and stock-outs | Uses the same cleaned days as daily sales |
+| 22 | The monthly plan used raw history, inflated by past sales and depressed by stock-outs | Those days are left out and each month is scaled back to 30 days |
+| 23 | An interrupted upload left orphaned pieces in the shared store | Pieces older than the current version and over 10 minutes old are deleted on load |
+
+Nine unused or silently overridden functions were removed.

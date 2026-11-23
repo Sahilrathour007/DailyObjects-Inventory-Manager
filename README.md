@@ -60,7 +60,11 @@ Templates are in [`templates/`](templates). Column names can be in any order; th
 | Daily stock history | date, sku, location, on_hand | Weekly (recommended) |
 | Marketplace listings | sku, channel, status (optional) | Monthly (optional) |
 
-Uploading orders, production or stock history **adds by date**: only the dates in the file are replaced. Replacing all history is refused if the file is shorter than the planning window.
+Uploads are safe to combine from several systems:
+- **Orders and stock history** add by date: only the dates *and channels or locations* in the file are replaced, so a store POS file never deletes marketplace orders.
+- **Stock on hand** replaces only the locations in the file, so a store-only file keeps warehouse stock.
+- Replacing all history is refused if the file is shorter than the planning window.
+- Unrecognised channel names ship from the warehouse; any location containing "warehouse", "WH", "hub" or "godown" counts as the warehouse.
 
 ## How the numbers are worked out
 

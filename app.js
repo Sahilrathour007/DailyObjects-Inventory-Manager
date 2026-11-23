@@ -126,8 +126,10 @@ function resolveChannel(raw){
   const al=[[/amazon|\bamz\b|\bfba\b/,'Amazon'],[/flipkart|\bfk\b|\bfbf\b/,'Flipkart'],[/myntra/,'Myntra'],[/blinkit|grofers/,'Blinkit'],[/zepto/,'Zepto'],[/instamart|swiggy/,'Instamart'],[/website|shopify|\bown\b|direct|\bd2c\b|\.com\b|storefront/,'Website']];
   for(const [re,n] of al){if(re.test(l)){ch=S.channels.find(c=>c.name===n);if(ch)return n;}}
   if(/retail|offline|\bstore\b|outlet|exclusive|experience/.test(l)){if(S.channels.find(c=>c.name==='Retail (unassigned)'))return 'Retail (unassigned)';}
-  const name=t.slice(0,30);S.channels.push(withDef({name,type:'Other',fee:15,ret:8,disc:20,L:3,node:1}));return name;
+  const name=t.slice(0,30);S.channels.push(withDef({name,type:'Other',fee:15,ret:8,disc:20,L:0,node:0}));return name;
 }
+function isHub(raw){const t=String(raw||'').trim(),l=t.toLowerCase();if(/^(hub|central|warehouse|wh|main|dc|mother)/i.test(t))return true;if(!/warehouse|\bwh\b|\bhub\b|godown/.test(l))return false;
+  return !S.channels.some(c=>c.name.toLowerCase()===l)&&!STORES.some(x=>x.re.test(l))&&!/amazon|flipkart|myntra|blinkit|zepto|instamart|swiggy/.test(l);}
 /* Stock-out days for one listing in the window. A day counts only if no units sold that day.
    Source 1: daily stock history at the location that ships it (Hub for warehouse channels, the channel itself for stores / dark stores).
    Source 2 (fallback): a run of zero-sales days at least oosStreak long, on a listing that had sold before. */
@@ -160,14 +162,14 @@ function compute(){
     const [sku,chn]=key.split('\t'),s=skuMap.get(sku),ch=chMap.get(chn);if(!s||!ch)return;
     let sum=0,sq=0,last=-1e9;m.forEach((q,dd)=>{if(dd>last)last=dd;if(dd>=start&&dd<=maxDay){sum+=q;sq+=q*q;}});
     const B=Math.max(1,Math.round(ch.bucket||7)),nb=Math.floor(W/B),bulk=ch.demand==='bulk'&&nb>=1;
-    let evN=0,d,sigD,bm=0,bsd=0,o={set:new Set(),src:'bulk'},Wn=W,dRaw=NaN;
+    let evN=0,exS=null,d,sigD,bm=0,bsd=0,o={set:new Set(),src:'bulk'},Wn=W,dRaw=NaN;
     if(bulk){const sums=new Array(nb).fill(0);m.forEach((q,dd)=>{const k=Math.floor((maxDay-dd)/B);if(dd<=maxDay&&k>=0&&k<nb)sums[k]+=q;});
       const tot=sums.reduce((a,x)=>a+x,0);bm=tot/nb;d=tot/(nb*B);
       bsd=nb>1?Math.sqrt(sums.reduce((a,x)=>a+(x-bm)*(x-bm),0)/(nb-1)):0;sigD=bsd/Math.sqrt(B);}
-    else{o=oosSet(sku,ch.node?chn:'Hub',m,start,maxDay);const ex=new Set(o.set);evDays(chn,start,maxDay).forEach(x=>{if(!o.set.has(x)){ex.add(x);evN++;}});Wn=W-ex.size;dRaw=sum/W;let s2=0,q2=0;m.forEach((q,dd)=>{if(dd>=start&&dd<=maxDay&&!ex.has(dd)){s2+=q;q2+=q*q;}});d=Wn>0?s2/Wn:0;sigD=Math.sqrt(Wn>1?Math.max(0,(q2-Wn*d*d)/(Wn-1)):0);}
+    else{o=oosSet(sku,ch.node?chn:'Hub',m,start,maxDay);const ex=exS=new Set(o.set);evDays(chn,start,maxDay).forEach(x=>{if(!o.set.has(x)){ex.add(x);evN++;}});Wn=W-ex.size;dRaw=sum/W;let s2=0,q2=0;m.forEach((q,dd)=>{if(dd>=start&&dd<=maxDay&&!ex.has(dd)){s2+=q;q2+=q*q;}});d=Wn>0?s2/Wn:0;sigD=Math.sqrt(Wn>1?Math.max(0,(q2-Wn*d*d)/(Wn-1)):0);}
     const ok=s.mrp>0&&isFinite(s.cogs)&&s.cogs>=0;
     const e=ok?econ(s,ch):null,price=ok?e.P:NaN,cm=ok?e.cm:NaN;
-    rows.push({key:sku+'\t'+chn,sku,ch:chn,s,chO:ch,d,sig:sigD,bulk,B,nb,bm,bsd,last,oos:o.set.size,evN,oosSrc:o.src,Wn,dRaw,thin:!bulk&&Wn<Math.max(7,0.25*W),since:maxDay-last,units:d*30,ok,e,price,cm,cmPct:ok?e.cmPct:NaN,contrib:ok?d*30*cm:NaN});
+    rows.push({key:sku+'\t'+chn,sku,ch:chn,s,chO:ch,d,sig:sigD,bulk,B,nb,bm,bsd,last,oos:o.set.size,evN,ex:exS,oosSrc:o.src,Wn,dRaw,thin:!bulk&&Wn<Math.max(7,0.25*W),since:maxDay-last,units:d*30,ok,e,price,cm,cmPct:ok?e.cmPct:NaN,contrib:ok?d*30*cm:NaN});
   });
   // thresholds per channel
   const thr={};S.channels.forEach(c=>{thr[c.name]=percentile(rows.filter(r=>r.ch===c.name&&r.ok&&r.units>0).map(r=>r.units),V.classPct);});
@@ -405,9 +407,10 @@ function applySkus(rows,map,mode){
   return `${add} SKUs added, ${upd} updated.`;
 }
 function applyOrders(rows,map,mode){
-  if(mode==='replace')ORD=new Map();else dropRange(ORD,fileRange(rows,map.date));
+  if(mode==='replace')ORD=new Map();else dropRange(ORD,fileRange(rows,map.date),new Set(rows.slice(1).map(r=>resolveChannel(String(r[map.channel]==null?'':r[map.channel]).trim()||'Unknown'))));
   const known=new Set(S.skus.map(s=>s.sku));let n=0,bad=0,skip=0,newSku=new Set();
-  const re=new RegExp(V.exclude||'$^','i'),chCache=new Map();
+  let re;try{re=new RegExp(V.exclude||'$^','i');}catch(e){re=/cancel|rto|return|fail/i;toast('The “ignore order status” pattern is not valid, so the default (cancel, RTO, return, fail) was used. Fix it under Planning rules.');}
+  const chCache=new Map();
   rows.slice(1).forEach(r=>{
     const sku=String(r[map.sku]==null?'':r[map.sku]).trim(),day=parseDay(r[map.date]),q=num(r[map.qty]);
     if(!sku||day==null||!isFinite(q)||q<=0){bad++;return;}
@@ -432,27 +435,31 @@ function applyProd(rows,map,mode){
   return `${n} production rows imported${bad?`, ${bad} unreadable`:''}${add?`. ${add} new SKUs added without MRP or COGS`:''}.`;
 }
 function applyStockHist(rows,map,mode){
-  if(mode==='replace')STK=new Map();else dropRange(STK,fileRange(rows,map.date));
+  if(mode==='replace')STK=new Map();else dropRange(STK,fileRange(rows,map.date),new Set(rows.slice(1).map(r=>{const x=String(r[map.node]==null?'':r[map.node]).trim();return isHub(x)?'Hub':resolveChannel(x);})));
   const known=new Set(S.skus.map(s=>s.sku));let n=0,bad=0,unk=0;
   rows.slice(1).forEach(r=>{
     const sku=String(r[map.sku]==null?'':r[map.sku]).trim(),raw=String(r[map.node]==null?'':r[map.node]).trim(),day=parseDay(r[map.date]),on=num(r[map.onhand]);
     if(!sku||!raw||day==null||!isFinite(on)){bad++;return;}
     if(!known.has(sku)){unk++;return;}
-    const node=/^(hub|central|warehouse|wh|main|dc|mother)/i.test(raw)?'Hub':resolveChannel(raw),key=sku+'\t'+node;
+    const node=isHub(raw)?'Hub':resolveChannel(raw),key=sku+'\t'+node;
     if(!STK.has(key))STK.set(key,new Map());STK.get(key).set(day,on);n++;
   });
   return `${n} stock-history rows imported${bad?`, ${bad} unreadable`:''}${unk?`, ${unk} skipped for SKUs not in the master (load the SKU master first)`:''}.`;
 }
 function applyStock(rows,map){
-  S.stock=[];{const dd=$('#o-date')?parseDay($('#o-date').value):null;S.stockAt=dd!=null?dd:Math.floor(Date.now()/864e5);}let n=0,bad=0;
+  const dd=$('#o-date')?parseDay($('#o-date').value):null,add=[];let n=0,bad=0;
   rows.slice(1).forEach(r=>{
     const sku=String(r[map.sku]==null?'':r[map.sku]).trim(),raw=String(r[map.node]==null?'':r[map.node]).trim(),on=num(r[map.onhand]);
     if(!sku||!raw||!isFinite(on)){bad++;return;}
-    const node=/^(hub|central|warehouse|wh|main|dc|mother)/i.test(raw)?'Hub':resolveChannel(raw);
+    const node=isHub(raw)?'Hub':resolveChannel(raw);
     const tr=map.transit>=0?num(r[map.transit]):0;
-    S.stock.push({sku,node,onhand:on,transit:isFinite(tr)?tr:0});n++;
+    add.push({sku,node,onhand:on,transit:isFinite(tr)?tr:0});n++;
   });
-  return `${n} stock rows imported${bad?`, ${bad} unreadable`:''}.`;
+  // a file from one system (e.g. store POS) must not wipe stock reported by another (e.g. the warehouse)
+  const locs=new Set(add.map(x=>x.node)),kept=[...new Set(S.stock.filter(x=>!locs.has(x.node)).map(x=>x.node))];
+  S.stock=S.stock.filter(x=>!locs.has(x.node)).concat(add);
+  if(locs.has('Hub')||S.stockAt==null)S.stockAt=dd!=null?dd:Math.floor(Date.now()/864e5);
+  return `${n} stock rows imported for ${locs.size} locations${bad?`, ${bad} unreadable`:''}.${kept.length?` ${kept.length} other locations kept from earlier uploads.`:''}`;
 }
 
 /* ---------- export ---------- */
@@ -487,36 +494,6 @@ const td=(v,c)=>`<td class="${c||''}">${v}</td>`;
 const noData=()=>`<div class="note">No orders loaded yet. The data desk uploads them (Uploads &amp; checks).</div>`;
 
 /* ---------- renderers ---------- */
-function rOverviewOld(){
-  const cs=M.rows.reduce((o,r)=>{o[r.cls]=(o[r.cls]||0)+1;return o;},{});
-  const hubSave=[...M.hub.values()].reduce((a,h)=>a+h.saveV,0),hubSS=[...M.hub.values()].reduce((a,h)=>a+h.ss*(isFinite(h.s.cogs)?h.s.cogs:0),0);
-  const fwd=M.nodes.reduce((a,n)=>a+n.up*(isFinite(n.s.cogs)?n.s.cogs:0),0);
-  const T=towerCalc();
-  const stat=[
-   ['1','Segment','Class every SKU × channel by volume and margin; set availability targets.',`${cs.A||0} A · ${cs.B||0} B · ${cs.C||0} C · ${(cs.X||0)+(cs['0']||0)} to review`,'segment'],
-   ['2','Hub pool','Hold the safety stock once, at the hub.',M.has?`Pooling cuts hub safety stock by ${inrC(hubSave)} of COGS`:'Needs orders','hub'],
-   ['3','Forward nodes','Thin A-only stock near the customer, refilled from sales.',`${M.nodes.length} node positions, up to ${inrC(fwd)} of COGS`,'nodes'],
-   ['4','Control tower','Daily refill list from sell-through, on-hand and in-transit.',T.has?`${T.refill.length} refills due, ${T.hubTrig.length} hub orders due`:'Needs stock file','tower'],
-   ['◆','Production & stock','Units made per day against units sold, and what we hold.',(PROD.size||S.stock.length)?`${fi(S.stock.filter(x=>x.node==='Hub').reduce((a,x)=>a+x.onhand,0))} units on hand at the hub`:'Needs production and stock files','prodinv'],
-   ['★','Availability now','What target today’s stock can support, and the units that close each gap.',availSummary(),'avail'],
-   ['5','Surges','Stock commitment and profit check before a promotion.',`${S.events.length} event${S.events.length===1?'':'s'} planned`,'surges'],
-   ['6','Capacity','Forecast families monthly; decide SKU mix late.','Monthly family forecast and late mix','capacity']];
-  const warn=[];
-  if(S.demo)warn.push('You are looking at generated demo data. COGS, fees and orders are invented. Upload your own SKU, order and stock files.');
-  if(M.missing)warn.push(`${M.missing} SKUs have no MRP or COGS, so they cannot be classed. Fix them under SKUs &amp; COGS.`);
-  if(!M.has)warn.push('No orders loaded.');
-  if(saveFailed)warn.push('Your data is too large to keep in this browser between visits. Export before closing.');
-  return `${warn.map(w=>`<div class="note">${w}</div>`).join('')}
-  <div class="kpis">
-    <div class="kpi"><b>${fi(S.skus.length)}</b><span>SKUs</span></div>
-    <div class="kpi"><b>${fi(M.rows.length)}</b><span>SKU × channel listings with orders</span></div>
-    <div class="kpi"><b>${fi(M.rows.reduce((a,r)=>a+r.units,0))}</b><span>units / month (last ${V.W} days)</span></div>
-    <div class="kpi"><b>${inrC(M.totalContrib)}</b><span>contribution / month</span></div>
-    <div class="kpi"><b>${M.has?dayStr(M.minDay)+' → '+dayStr(M.maxDay):'–'}</b><span>order history range</span></div>
-  </div>
-  <div class="card"><h2>The six steps</h2><div class="steps">${stat.map(s=>`<button class="step" data-go="${s[4]}"><span class="num">STEP ${s[0]}</span><b>${s[1]}</b><span class="mute small">${s[2]}</span><span class="small">${s[3]}</span></button>`).join('')}</div></div>
-  <div class="card"><h2>Contribution by class and channel</h2>${chanTable()}</div>`;
-}
 function chanTable(){
   const isSt=n=>STORES.some(x=>x.ch===n),rows=M.chSum.filter(c=>c.n||isSt(c.name)).map(c=>`<tr>${td(esc(c.name))}${['A','B','C','X','0','?'].map(k=>td(c[k]||'','n')).join('')}${td(fi(c.units),'n')}${td(inrC(c.contrib),'n')}</tr>`);
   return table([['Channel'],['A','n'],['B','n'],['C','n'],['X','n'],['0','n'],['?','n'],['Units / month','n'],['Contribution / month','n']],rows,'No listings yet.')+
@@ -630,38 +607,6 @@ function dqCard(){
   return `<div class="card"><h2>Data quality</h2><p>${bad?`<b class="bad">${bad} to fix</b>, `:''}${w?`<b class="amber">${w} to check</b>`:(bad?'':'<b class="ok">No problems found</b>')}. Nothing is dropped silently: these checks run on whatever is loaded and update with every upload.</p>
    <div class="tw"><table class="t"><thead><tr><th>Status</th><th>Check</th><th>Detail</th></tr></thead><tbody>${q.map(x=>`<tr><td class="${cls[x.sev]}">${sym[x.sev]}</td><td>${esc(x.name)}</td><td class="wrapc">${esc(x.text)}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
-function rData(){
-  const nOrd=[...ORD.values()].reduce((a,m)=>a+m.size,0),units=[...ORD.values()].reduce((a,m)=>{let s=0;m.forEach(q=>s+=q);return a+s;},0);
-  const hubRows=S.stock.filter(s=>s.node==='Hub').length;
-  const spec=`<div class="tw"><table class="t"><thead><tr><th>File</th><th>Columns the importer looks for (any order, headers auto-matched)</th></tr></thead><tbody>
-   <tr><td>SKU master</td><td>SKU code, name, category, MRP, COGS per unit</td></tr>
-   <tr><td>Orders</td><td>Order date, SKU code, channel, quantity, optional status. One row per order line is fine; rows are summed per day.</td></tr>
-   <tr><td>Production</td><td>Production date, SKU code, units produced</td></tr>
-   <tr><td>Stock</td><td>SKU code, location (Hub or a channel name), on hand, optional in transit</td></tr>
-   <tr><td>Stock history</td><td>Date, SKU code, location, on hand at end of day</td></tr></tbody></table></div>`;
-  return strip('data')+dqCard()+`<div class="cols">
-   <div class="card"><h2>Orders / demand</h2><p>${ORD.size?`${fi(nOrd)} SKU-channel-days, ${fi(ORD.size)} listings, ${fi(units)} units, ${dayStr(M.minDay)} → ${dayStr(M.maxDay)}.`:'None loaded.'}</p>
-     <div class="drop" data-drop="orders">Drop a CSV or Excel file here</div>
-     <div class="row"><button class="btn pri" data-act="pick" data-k="orders">Upload orders</button><button class="btn" data-act="tpl" data-k="orders">Template</button><button class="btn danger" data-act="clearOrders">Clear orders</button></div>
-     <p class="mute small">Quick commerce: upload the purchase orders you receive (date, SKU, quantity). The planner treats those channels as bulk and measures variability per order cycle. Dates are read day-first (20/11/2026) unless the file uses 2026-11-20. Rows with unknown channels create a new channel with placeholder terms; check them under Variables. New SKUs are added to the master without COGS. For retail sales, put the store name in the channel column (for example “Sky City” or “GK-1”); a plain “Retail” lands in an unassigned bucket that ships from the warehouse.</p></div>
-   <div class="card"><h2>Stock on hand</h2><p>${S.stock.length?`${fi(S.stock.length)} rows, ${fi(hubRows)} at the hub.`:'None loaded.'}</p>
-     <div class="drop" data-drop="stock">Drop a CSV or Excel file here</div>
-     <div class="row"><button class="btn pri" data-act="pick" data-k="stock">Upload stock</button><button class="btn" data-act="tpl" data-k="stock">Template</button><button class="btn danger" data-act="clearStock">Clear stock</button></div>
-     <p class="mute small">Needed by the control tower, surge check and capacity mix.</p></div></div>
-   <div class="card"><h2>Stock history (daily)</h2><p>${STK.size?`${fi(STK.size)} SKU-locations, ${fi([...STK.values()].reduce((a,m)=>a+m.size,0))} daily records.`:'None loaded.'}</p>
-     <div class="drop" data-drop="stockhist">Drop a CSV or Excel file here</div>
-     <div class="row"><button class="btn pri" data-act="pick" data-k="stockhist">Upload stock history</button><button class="btn" data-act="tpl" data-k="stockhist">Template</button><button class="btn danger" data-act="clearStk">Clear history</button></div>
-     <p class="mute small">End-of-day on-hand by SKU and location (Hub, or a store / dark-store name). A day counts as a stock-out only when on hand is zero and nothing sold that day. Gaps between records carry the last value forward. This is the reliable way to stop stock-outs from looking like low demand.</p></div>
-   <div class="card"><h2>Production log</h2><p>${PROD.size?`${fi([...PROD.values()].reduce((a,m)=>a+m.size,0))} SKU-days of production, ${fi([...PROD.values()].reduce((a,m)=>{let t=0;m.forEach(q=>t+=q);return a+t;},0))} units.`:'None loaded.'}</p>
-     <div class="drop" data-drop="prod">Drop a CSV or Excel file here</div>
-     <div class="row"><button class="btn pri" data-act="pick" data-k="prod">Upload production</button><button class="btn" data-act="tpl" data-k="prod">Template</button><button class="btn danger" data-act="clearProd">Clear production</button></div>
-     <p class="mute small">One row per production run or day: date, SKU, units. Feeds the Production &amp; stock tab.</p></div>
-   <div class="card"><h2>File format</h2>${spec}</div>
-   <div class="card"><h2>Pulling orders automatically (Unicommerce and similar)</h2>
-     <p>This page cannot call an order system’s API directly: the browser blocks requests to other sites, and an API key typed into a web page is not safe to keep. Today the route is a scheduled export from your order system (Unicommerce, Increff, Shiprocket, a marketplace report) saved as CSV or Excel, then uploaded here. The column matcher above handles differently named headers.</p>
-     <p>A live feed needs a small backend that holds the API credentials, pulls orders daily and serves them as a file or endpoint this page can read. That is the next build if you want it.</p>
-     <div class="row"><button class="btn danger" data-act="clearDemo">${S.demo?'Remove demo data':'Reset everything'}</button><button class="btn" data-act="demo">Load demo data</button></div></div>`;
-}
 function filterRows(){
   const q=UI.q.toLowerCase();
   return M.rows.filter(r=>(UI.segCh==='All'||r.ch===UI.segCh)&&(UI.segCls==='All'||r.cls===UI.segCls)&&(!q||(r.sku+' '+r.s.name+' '+r.s.cat).toLowerCase().includes(q)));
@@ -706,16 +651,6 @@ function rHub(){
   <div class="card"><h3>Hub stock by SKU</h3>${table([['SKU'],['Name'],['Best class'],['d, units/day','n'],['σ pooled','n'],['z','n'],['Safety stock, unpooled','n'],['Safety stock, hub','n'],['Saving, units','n'],['Saving, ₹ COGS','n'],['Hub reorder point','n'],['Hub order-up-to','n']],rows)}
   <p class="mute small">Reorder point = d × hub lead time + safety stock. Order-up-to adds the production cycle. Cycle stock from batch sizes is not modelled. Pooling saving assumes the correlation variable above; a promotion across all channels at once raises it.</p></div>`;
 }
-function rNodes(){
-  if(!M.has)return head(3,'Thin forward nodes, refilled from actual sales','Ch. 5 pp. 104–106, Ch. 7 pp. 154–156','')+noData();
-  const rows=M.nodes.sort((a,b)=>b.d-a.d).slice(0,400).map(n=>`<tr>${td(esc(n.sku))}${td(esc(n.s.name),'wrapc')}${td(esc(n.ch))}${td(n.target+'%','n')}${td(f2(n.z),'n')}${td(f2(n.d),'n')}${td(f2(n.sig),'n')}${td(n.L,'n')}${td(f1(n.ss),'n')}${td(fi(n.rop),'n')}${td(fi(n.up),'n')}${td(n.d>0?f1(n.up/n.d):'–','n')}${td(inr(n.up*(isFinite(n.s.cogs)?n.s.cogs:0)),'n')}</tr>`);
-  const skipped=M.rows.filter(r=>r.cls!=='A'&&r.chO.node&&r.units>0).length;
-  const cap=M.nodes.reduce((a,n)=>a+n.up*(isFinite(n.s.cogs)?n.s.cogs:0),0);
-  return head(3,'Thin forward nodes, refilled from actual sales','Ch. 5 pp. 104–106, Ch. 7 pp. 154–156','Only the quick-commerce dark stores and the retail stores hold stock outside the company warehouse. They hold only A items, sized in days of cover, and are refilled small and often. Big infrequent orders turn a 10% demand rise into a 40% order spike upstream. Averages come from trailing sell-through: a crude short-horizon estimate, not the long-horizon SKU forecast that fails.')+strip('nodes')+
-  `<div class="kpis"><div class="kpi"><b>${fi(M.nodes.length)}</b><span>A listings with a forward node</span></div><div class="kpi"><b>${inrC(cap)}</b><span>forward stock at order-up-to, COGS</span></div><div class="kpi"><b>${fi(skipped)}</b><span>selling non-A listings on node channels, served from the hub only</span></div></div>
-  <div class="card"><h3>Reorder points: ROP = d × L + z × σ × √L</h3>${table([['SKU'],['Name'],['Channel'],['Target','n'],['z','n'],['d / day','n'],['σ / day','n'],['L, days','n'],['Safety stock','n'],['Reorder point','n'],['Order-up-to','n'],['Days of cover at order-up-to','n'],['Value at COGS','n']],rows,'No class A listings sit on a channel with a forward node. Check the class cut-offs or the channel “forward node” setting.')}
-  <p class="mute small">The z-scores and the formula are standard inventory maths, not the book’s. Order-up-to = reorder point + d × refill cycle.</p></div>`+bulkCard();
-}
 function bulkCard(){
   const rs=M.rows.filter(r=>r.bulk&&r.units>0&&r.z!=null).sort((a,b)=>b.units-a.units).slice(0,300);
   const rows=rs.map(r=>`<tr>${td(esc(r.sku))}${td(esc(r.s.name),'wrapc')}${td(esc(r.ch))}${td(chip(r.cls))}${td(r.B,'n')}${td(r.nb,'n')}${td(fi(r.bm),'n')}${td(fi(r.bsd),'n')}${td(fi(r.bm+r.z*r.bsd),'n')}${td(isFinite(r.last)?dayStr(r.last):'–','n')}${td(isFinite(r.since)?r.since:'–','n')}</tr>`);
@@ -723,110 +658,6 @@ function bulkCard(){
    <p>Quick commerce buys in bulk, so the brand sees purchase orders, not consumer sales per day. These figures come from order-cycle totals. “Keep ready” is the average cycle order plus z × the spread of cycle orders, so one purchase order at the target service level can be filled from the warehouse. Their dark-store stock is theirs; this is what the warehouse must be able to ship.</p>
    ${table([['SKU'],['Name'],['Channel'],['Class'],['Cycle, days','n'],['Cycles in window','n'],['Avg per cycle','n'],['Spread (σ) per cycle','n'],['Keep ready','n'],['Last order','n'],['Days since','n']],rows,'No quick-commerce listings with orders. Mark a channel “Bulk purchase orders” under Variables.')}
    <p class="mute small">Few cycles in the window make the spread unreliable; raise the trailing window if “Cycles in window” is below about 4.</p></div>`;
-}
-function towerCalc(){
-  const st=new Map();S.stock.forEach(s=>st.set(s.sku+'\t'+s.node,s));
-  const out={has:S.stock.length>0,nodeRows:[],refill:[],hubTrig:[],short:0,hidden:0};
-  if(!out.has||!M)return out;
-  const bySku=new Map();
-  M.nodes.forEach(n=>{
-    const s=st.get(n.sku+'\t'+n.ch);if(!s&&n.r.chO.see===0){out.hidden++;return;}
-    const on=s?s.onhand:0,tr=s?s.transit:0,pos=on+tr,doc=n.d>0?pos/n.d:Infinity;
-    const trigger=pos<=n.rop||doc<V.trigDOC,need=trigger?Math.max(0,Math.ceil(n.up-pos)):0;
-    const o={...n,has:!!s,on,tr,pos,doc,trigger,need,give:0};out.nodeRows.push(o);
-    if(!bySku.has(n.sku))bySku.set(n.sku,[]);bySku.get(n.sku).push(o);
-  });
-  bySku.forEach((os,sku)=>{
-    const h=M.hub.get(sku),hs=st.get(sku+'\tHub'),on=hs?hs.onhand:0,res=(h?h.direct:0)*V.reserve;let avail=Math.max(0,on-res);
-    os.filter(o=>o.need>0).sort((a,b)=>a.doc-b.doc).forEach(o=>{o.give=Math.min(o.need,avail);avail-=o.give;o.short=o.need-o.give;});
-  });
-  out.refill=out.nodeRows.filter(o=>o.need>0);out.short=out.refill.reduce((a,o)=>a+(o.short||0),0);
-  M.hub.forEach(h=>{
-    if(h.dTot<=0)return;const hs=st.get(h.sku+'\tHub'),on=hs?hs.onhand:0,tr=hs?hs.transit:0,pos=on+tr;
-    out.hubTrig.push({...h,on,tr,pos,doc:pos/h.dTot,has:!!hs,trigger:pos<=h.rop,qty:pos<=h.rop?Math.ceil(h.up-pos):0});
-  });
-  const rk={A:0,B:1,C:2,X:3,'0':4,'?':5};
-  out.hubTrig=out.hubTrig.filter(h=>h.trigger).sort((a,b)=>rk[a.best]-rk[b.best]||a.doc-b.doc);
-  return out;
-}
-function rTower(){
-  const head4=head(4,'Control tower: substitute information for inventory','Ch. 4 pp. 85–87, VMI and CPFR p. 94','Daily sell-through from each channel plus on-hand and in-transit stock does the work safety stock used to do. Three rules: refill a node when its position falls to the reorder point or its days of cover fall below the trigger; if the hub is short, serve the lowest days of cover first and A SKUs before others at the hub; move stock only from the hub, never between nodes.')+strip('tower');
-  if(!M.has)return head4+noData();
-  const T=towerCalc();
-  if(!T.has)return head4+`<div class="note">Upload a stock file (SKU, location, on hand, in transit) to get the daily refill list. Location is “Hub” or a channel name.</div><div class="row"><button class="btn pri" data-act="pick" data-k="stock">Upload stock</button></div>`;
-  const rr=T.refill.sort((a,b)=>a.doc-b.doc).slice(0,400).map(o=>`<tr>${td(esc(o.sku))}${td(esc(o.s.name),'wrapc')}${td(esc(o.ch))}${td(fi(o.on),'n')}${td(fi(o.tr),'n')}${td(f1(o.doc),'n')}${td(fi(o.rop),'n')}${td(fi(o.up),'n')}${td(fi(o.need),'n')}${td(fi(o.give),'n')}${td(o.short>0?`<span class="bad">${fi(o.short)}</span>`:'<span class="ok">0</span>','n')}${td(o.has?'':'<span class="amber">no stock row, assumed 0</span>')}</tr>`);
-  const hr=T.hubTrig.slice(0,300).map(h=>`<tr>${td(esc(h.sku))}${td(esc(h.s.name),'wrapc')}${td(chip(h.best))}${td(fi(h.on),'n')}${td(fi(h.tr),'n')}${td(f1(h.doc),'n')}${td(fi(h.rop),'n')}${td(fi(h.up),'n')}${td(fi(h.qty),'n')}</tr>`);
-  const ok=T.nodeRows.filter(o=>!o.trigger).length;
-  return head4+`<div class="kpis"><div class="kpi"><b>${T.refill.length}</b><span>node refills due</span></div><div class="kpi"><b>${fi(T.short)}</b><span>units the hub cannot cover</span></div><div class="kpi"><b>${T.hubTrig.length}</b><span>hub orders due (make or buy)</span></div><div class="kpi"><b>${ok}</b><span>nodes above trigger</span></div></div>${T.hidden?`<div class="note">${T.hidden} quick-commerce positions are left out because their stock is not visible to us and no stock row was uploaded. Upload the platform’s inventory report to include them.</div>`:''}
-  <div class="card"><div class="row"><h3>Refill from hub today</h3><span class="spacer"></span><button class="btn" data-act="expRefill">Export CSV</button></div>${table([['SKU'],['Name'],['Node'],['On hand','n'],['In transit','n'],['Days of cover','n'],['Reorder point','n'],['Order-up-to','n'],['Needed','n'],['Send from hub','n'],['Shortfall','n'],['']],rr,'No node is at or below its trigger.')}</div>
-  <div class="card"><h3>Hub: make or buy (A SKUs first)</h3>${table([['SKU'],['Name'],['Best class'],['On hand','n'],['In transit','n'],['Days of cover','n'],['Reorder point','n'],['Order-up-to','n'],['Order qty','n']],hr,'No hub position is at or below its reorder point.')}</div>`;
-}
-function evCalc(ev){
-  const s=parseDay(ev.start),e=parseDay(ev.end),days=s!=null&&e!=null?Math.max(1,e-s+1):0;
-  const st=new Map();S.stock.forEach(x=>st.set(x.sku+'\t'+x.node,x));
-  const inScope=M.rows.filter(r=>(ev.ch==='All'||r.ch===ev.ch)&&r.ok&&r.units>0&&(ev.scope==='all'||(ev.scope==='AB'?['A','B'].includes(r.cls):r.cls==='A')));
-  let base=0,inc=0,cmBase=0,cmPromo=0,shortU=0,shortS=0,detail=[];
-  inScope.forEach(r=>{
-    const b=r.d*days,i=b*ev.uplift/100,cmp=econ(r.s,r.chO,ev.disc).cm;
-    base+=b;inc+=i;cmBase+=b*r.cm;cmPromo+=(b+i)*cmp;
-    const h=M.hub.get(r.sku),hs=st.get(r.sku+'\tHub'),free=hs&&h?Math.max(0,hs.onhand+hs.transit-h.ss):0,sh=Math.max(0,i-free);
-    if(S.stock.length&&sh>0){shortU+=sh;shortS++;}
-    detail.push({r,i,free,sh,cmp});
-  });
-  return {days,n:inScope.length,base,inc,delta:cmPromo-cmBase,cmBase,cmPromo,shortU,shortS,detail,hasStock:S.stock.length>0};
-}
-function rSurges(){
-  const head5=head(5,'Plan the surges','Ch. 7 pp. 155–156','Marketplace sale events and quick-commerce promotions create the same distortion. Do not run a promotion without a stock commitment from the hub. The check below asks two things: can the hub cover the extra units without eating its safety stock, and does the promotion add contribution after the deeper discount. The book cites one study finding only 16% of grocery promotions profitable; treat that as a prompt to test your own numbers.')+strip('surges');
-  if(!M.has)return head5+noData();
-  const out=S.events.map(ev=>{
-    const c=evCalc(ev),hold=c.hasStock&&c.shortS>0,loss=c.delta<=0;
-    const verdict=c.n===0?'<span class="mute">No selling listings in scope</span>':(hold?'<span class="bad">Hold: hub cannot commit</span>':!c.hasStock?'<span class="amber">Upload stock to test the commitment</span>':'<span class="ok">Hub can commit</span>')+' · '+(loss?'<span class="bad">loses contribution at this discount</span>':'<span class="ok">adds contribution</span>');
-    return {ev,c,verdict};
-  });
-  const cards=out.map(({ev,c,verdict})=>`<div class="card"><div class="row"><h3>${esc(ev.name)}</h3><span class="spacer"></span><button class="btn" data-act="selEv" data-id="${ev.id}">Show SKU detail</button><button class="btn danger" data-act="delEv" data-id="${ev.id}">Delete</button></div>
-   <div class="vars">
-    <div class="var"><label for="e${ev.id}n">Name</label><input id="e${ev.id}n" data-ev="${ev.id}:name" value="${esc(ev.name)}"></div>
-    <div class="var"><label for="e${ev.id}c">Channel</label><select id="e${ev.id}c" data-ev="${ev.id}:ch"><option>All</option>${S.channels.map(c=>`<option${ev.ch===c.name?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
-    <div class="var"><label for="e${ev.id}s">Start</label><input id="e${ev.id}s" type="date" data-ev="${ev.id}:start" value="${esc(ev.start)}" style="font-family:var(--mono)"></div>
-    <div class="var"><label for="e${ev.id}e">End</label><input id="e${ev.id}e" type="date" data-ev="${ev.id}:end" value="${esc(ev.end)}" style="font-family:var(--mono)"></div>
-    <div class="var"><label for="e${ev.id}u">Expected demand uplift</label><input id="e${ev.id}u" type="number" data-ev="${ev.id}:uplift" value="${ev.uplift}"><span class="u">% over baseline</span></div>
-    <div class="var"><label for="e${ev.id}d">Extra discount</label><input id="e${ev.id}d" type="number" data-ev="${ev.id}:disc" value="${ev.disc}"><span class="u">% off current price</span></div>
-    <div class="var"><label for="e${ev.id}x">Scope</label><select id="e${ev.id}x" data-ev="${ev.id}:scope"><option value="A"${ev.scope==='A'?' selected':''}>A listings only</option><option value="AB"${ev.scope==='AB'?' selected':''}>A and B</option><option value="all"${ev.scope==='all'?' selected':''}>All selling</option></select></div></div>
-   <div class="kpis"><div class="kpi"><b>${c.days}</b><span>days, ${c.n} listings</span></div><div class="kpi"><b>${fi(c.base)}</b><span>baseline units</span></div><div class="kpi"><b>${fi(c.inc)}</b><span>extra units to commit</span></div>
-    <div class="kpi"><b>${c.hasStock?fi(c.shortU):'–'}</b><span>units short at hub (${c.hasStock?c.shortS:'–'} SKUs)</span></div><div class="kpi"><b>${inrC(c.delta)}</b><span>change in contribution</span></div><div class="kpi"><b>${fi(ev.uplift*V.bull)}%</b><span>upstream order spike if replenished in one big order (${V.bull}×)</span></div></div>
-   <p>${verdict}</p></div>`).join('');
-  const sel=S.events.find(e=>e.id===UI.ev);let det='';
-  if(sel){const c=evCalc(sel);const rows=c.detail.sort((a,b)=>b.sh-a.sh||b.i-a.i).slice(0,80).map(d=>`<tr>${td(esc(d.r.sku))}${td(esc(d.r.s.name),'wrapc')}${td(esc(d.r.ch))}${td(chip(d.r.cls))}${td(fi(d.i),'n')}${td(fi(d.free),'n')}${td(fi(d.sh),'n')}${td(inr(d.r.cm),'n')}${td(inr(d.cmp),'n')}</tr>`);
-    det=`<div class="card"><h3>SKU detail: ${esc(sel.name)}</h3>${table([['SKU'],['Name'],['Channel'],['Class'],['Extra units','n'],['Hub free stock','n'],['Short','n'],['CM / unit now','n'],['CM / unit on promo','n']],rows)}<p class="mute small">Hub free stock = on hand + in transit − hub safety stock. Top 80 rows.</p></div>`;}
-  return head5+cards+`<div class="row"><button class="btn pri" data-act="addEv">Add event</button></div>`+det;
-}
-function rCapacity(){
-  const head6=head(6,'Forecast only for capacity, execute against demand','Ch. 4 pp. 89–91','Plan production at product-family level monthly (the S&amp;OP loop). Commit only part of the family forecast, and decide the SKU mix late from hub depletion. This does not change production lead time; it changes what you commit to making and when.')+strip('capacity');
-  if(!M.has)return head6+noData();
-  const skuCat=new Map(S.skus.map(s=>[s.sku,s.cat])),B=6,cats=new Map();
-  ORD.forEach((m,key)=>{const cat=skuCat.get(key.split('\t')[0])||'Uncategorised';if(!cats.has(cat))cats.set(cat,new Array(B).fill(0));const a=cats.get(cat);
-    m.forEach((q,d)=>{const b=Math.floor((M.maxDay-d)/30);if(b<B)a[b]+=q;});});
-  const full=Math.min(B,Math.floor((M.maxDay-M.minDay+1)/30));
-  if(full<1)return head6+`<div class="note">Needs at least 30 days of orders to form one monthly bucket.</div>`;
-  const n=Math.min(V.fMonths,full),st=new Map();S.stock.forEach(x=>{if(x.node==='Hub')st.set(x.sku+'\tHub',x);});
-  const rows=[...cats].map(([cat,a])=>{const hist=a.slice(0,full),avg=hist.slice(0,n).reduce((x,y)=>x+y,0)/n,fc=avg*(1+V.growth/100),com=fc*V.commit/100;return {cat,hist,avg,fc,com,late:fc-com};}).sort((a,b)=>b.fc-a.fc);
-  const trs=rows.map(r=>`<tr>${td(esc(r.cat))}${r.hist.slice().reverse().map(x=>td(fi(x),'n')).join('')}${td(fi(r.fc),'n')}${td(fi(r.com),'n')}${td(fi(r.late),'n')}</tr>`);
-  const heads=[['Product family'],...Array.from({length:full},(_,i)=>[i===0?'Latest 30d':`${i*30}–${i*30+30}d ago`,'n']).reverse(),['Forecast next 30d','n'],['Commit to production','n'],['Decide later','n']];
-  // late mix: allocate each family's "decide later" units to SKUs by hub gap (or contribution if no stock)
-  const mixRows=[];
-  rows.forEach(r=>{
-    const hs=[...M.hub.values()].filter(h=>(skuCat.get(h.sku)||'Uncategorised')===r.cat&&h.dTot>0);
-    const w=hs.map(h=>{const s=st.get(h.sku+'\tHub'),pos=s?s.onhand+s.transit:null;const gap=pos==null?h.dTot:Math.max(0,h.up-pos);return {h,pos,gap};});
-    const tot=w.reduce((a,x)=>a+x.gap,0);
-    w.forEach(x=>{const u=tot>0?r.late*x.gap/tot:0;if(u>=1)mixRows.push({r,x,u});});
-  });
-  mixRows.sort((a,b)=>b.u-a.u);
-  const mr=mixRows.slice(0,60).map(({r,x,u})=>`<tr>${td(esc(r.cat))}${td(esc(x.h.sku))}${td(esc(x.h.s.name),'wrapc')}${td(chip(x.h.best))}${td(x.pos==null?'–':fi(x.pos),'n')}${td(fi(x.h.up),'n')}${td(fi(u),'n')}</tr>`);
-  return head6+`<div class="card"><h3>Monthly forecast by product family (30-day buckets ending ${dayStr(M.maxDay)})</h3>${table(heads,trs)}
-   <p class="mute small">Forecast = average of the last ${n} buckets × (1 + ${V.growth}%). Units are sales across all channels. Only complete 30-day buckets are used.</p></div>
-  <div class="card"><div class="row"><h3>Late SKU mix for the uncommitted share</h3><span class="spacer"></span><button class="btn" data-act="expMix">Export CSV</button></div>
-   <p class="mute small">Uncommitted units are split across SKUs in the family by how far the hub position sits below its order-up-to level${S.stock.length?'':' (no stock file, so split by daily demand)'}. Top 60 shown.</p>
-   ${table([['Family'],['SKU'],['Name'],['Best class'],['Hub position','n'],['Hub order-up-to','n'],['Units to make','n']],mr,'Nothing to allocate.')}</div>`;
 }
 
 
@@ -1051,20 +882,20 @@ const DSETS={
  override:{enc:()=>S.override,dec:r=>{S.override=r||{};}},
  vars:{enc:()=>V,dec:r=>{VARS.forEach(v=>V[v.k]=v.d);Object.assign(V,r||{});}}
 };
-let wq=Promise.resolve();
+let wq=Promise.resolve();const SEEN={},seen=n=>SEEN[n]||(SEEN[n]=new Set());
 function dbErr(e){toast(e&&e.code==='quota_exceeded'?'The shared store is full. Clear old production or stock history before saving more.':e&&e.code==='invalid_argument'?'You can view this page but not change its data. Ask the owner for Contributor access.':'Could not save to shared data. Check your connection; your change is only on this screen.');}
 function writeSet(name,val,prev){
   const d=DSETS[name],col=DB.collection('ds'),old=HDR[name],meta={at:new Date().toISOString(),by:myId||'',rows:Array.isArray(val)?val.length:Object.keys(val||{}).length,file:UPFILE[name]||(old&&old.file)||''};
   if(d.extra)Object.assign(meta,d.extra());
   wq=wq.then(async()=>{
-    const cur=HDR[name];if(cur&&APPLIED[name]!==undefined&&(d.big?cur.gen:cur.at)!==APPLIED[name]){toast(`${DSLABEL[name]||name} was just changed by someone else. Your change was not saved; their version is shown.`);return;}
-    if(!d.big){APPLIED[name]=meta.at;await col.doc(name+'.h').set(Object.assign(meta,{inline:val}));}
+    const cur=HDR[name];if(cur&&!seen(name).has(d.big?cur.gen:cur.at)){toast(`${DSLABEL[name]||name} was just changed by someone else. Your change was not saved; their version is shown.`);return;}
+    if(!d.big){APPLIED[name]=meta.at;seen(name).add(meta.at);await col.doc(name+'.h').set(Object.assign(meta,{inline:val}));}
     else{
       const gen=Date.now().toString(36),chunks=[];let cur=[],size=0;
       val.forEach(r=>{const s=JSON.stringify(r).length;if(size+s>180000&&cur.length){chunks.push(cur);cur=[];size=0;}cur.push(r);size+=s;});
       chunks.push(cur);
       for(let i=0;i<chunks.length;i++)await col.doc(name+'.'+gen+'.'+i).set({r:chunks[i]});
-      APPLIED[name]=gen;
+      APPLIED[name]=gen;seen(name).add(gen);
       await col.doc(name+'.h').set(Object.assign(meta,{gen,n:chunks.length}));
       if(old&&old.gen&&old.n)for(let i=0;i<old.n;i++)await col.doc(name+'.'+old.gen+'.'+i).delete();
     }
@@ -1092,8 +923,10 @@ function onShared(snap){
   Object.keys(DSETS).forEach(n=>{
     const h=hdr[n];if(!h)return;const d=DSETS[n],tag=d.big?h.gen:h.at;if(APPLIED[n]===tag)return;
     let val;if(!d.big)val=h.inline;else{const parts=[];for(let i=0;i<h.n;i++){const c=DOCS.get(n+'.'+h.gen+'.'+i);if(!c)return;parts.push(...c.r);}val=parts;}
-    d.dec(val,h);APPLIED[n]=tag;LAST[n]=JSON.stringify(d.enc());changed=true;
+    d.dec(val,h);APPLIED[n]=tag;seen(n).add(tag);LAST[n]=JSON.stringify(d.enc());changed=true;
   });
+  if(!snap.metadata.fromCache&&canWrite&&!onShared.swept){onShared.swept=true;const now=Date.now(),col=DB.collection('ds');
+    DOCS.forEach((v,id)=>{const m=id.match(/^(\w+)\.([0-9a-z]+)\.\d+$/);if(!m)return;const h=hdr[m[1]],g=parseInt(m[2],36);if(h&&h.gen===m[2])return;if(now-g>600000&&(!h||!h.gen||g<parseInt(h.gen,36)))col.doc(id).delete().catch(()=>{});});}
   if(changed){M=compute();Object.keys(DSETS).forEach(n=>{if(HDR[n])LAST[n]=JSON.stringify(DSETS[n].enc());});render();resolveNames();}
   else render();
 }
@@ -1375,14 +1208,6 @@ function chListings(){
   return chartCard('SKUs on each marketplace','listings by class',bars(chs.sort((a,b)=>b.L.length-a.L.length).map(o=>{const n={};o.L.forEach(x=>n[x.cls]=(n[x.cls]||0)+1);return {l:o.c.name,segs:k.map(c=>[n[c]||0,CLSCOL[c],`${n[c]||0} class ${c}`]),txt:fi(o.L.length)};}),{aria:'Listings by channel and class'})+
    lg([[CLSCOL.A,'A high volume + margin'],[CLSCOL.B,'B'],[CLSCOL.C,'C low on both'],[CLSCOL.X,'X loses money'],['var(--line)','0 / ? listed, no sales or no cost']]));
 }
-function chCapacity(){
-  if(!M.has)return '';
-  const skuCat=new Map(S.skus.map(s=>[s.sku,s.cat])),cats=new Map();
-  ORD.forEach((m,key)=>{const cat=skuCat.get(key.split('\t')[0])||'Uncategorised';if(!cats.has(cat))cats.set(cat,[0,0,0,0,0,0]);const a=cats.get(cat);m.forEach((q,d)=>{const b=Math.floor((M.maxDay-d)/30);if(b<6)a[b]+=q;});});
-  const full=Math.min(6,Math.floor((M.maxDay-M.minDay+1)/30));if(full<1)return '';
-  const n=Math.min(V.fMonths,full),rs=[...cats].map(([cat,a])=>{const fc=a.slice(0,n).reduce((x,y)=>x+y,0)/n*(1+V.growth/100);return {cat,fc,last:a[0]};}).sort((a,b)=>b.fc-a.fc);
-  return chartCard('Next 30 days of production by family',`lock ${V.commit}% now, decide the rest later; tick = last 30 days sold`,bars(rs.map(r=>({l:r.cat,segs:[[r.fc*V.commit/100,COL.acc,`Lock now: ${fi(r.fc*V.commit/100)}`],[r.fc*(1-V.commit/100),'var(--accent-2)',`Decide later: ${fi(r.fc*(1-V.commit/100))}`]],m:r.last,mt:`Last 30 days: ${fi(r.last)}`,txt:fi(r.fc)})),{aria:'Capacity plan'})+lg([[COL.acc,'Lock with production now'],['var(--accent-2)','Decide later by SKU'],['var(--ink)','Sold last 30 days']]));
-}
 
 /* ================= SKUs listed on each marketplace ================= */
 function listingsFor(ch){
@@ -1426,14 +1251,16 @@ function evDays(ch,start,maxDay){const out=[];(S.events||[]).forEach(ev=>{if(ev.
 /* #9 correlation measured per SKU from daily orders: rho = (Var(total) − Σ var_i) ÷ ((Σ sd_i)² − Σ var_i) */
 function measRho(rs,start,maxDay){
   const ds=rs.filter(r=>!r.bulk&&r.d>0),n=maxDay-start+1;if(ds.length<2||n<14)return V.rho;
-  const tot=new Array(n).fill(0);let sv=0,ssd=0;
-  ds.forEach(r=>{const m=ORD.get(r.key),a=new Array(n).fill(0);if(m)m.forEach((q,d)=>{if(d>=start&&d<=maxDay)a[d-start]=q;});
-    const mu=a.reduce((x,y)=>x+y,0)/n,v=a.reduce((x,y)=>x+(y-mu)*(y-mu),0)/(n-1);sv+=v;ssd+=Math.sqrt(v);a.forEach((q,i)=>tot[i]+=q);});
-  const mt=tot.reduce((x,y)=>x+y,0)/n,vt=tot.reduce((x,y)=>x+(y-mt)*(y-mt),0)/(n-1),den=ssd*ssd-sv;
+  const skip=new Set();ds.forEach(r=>{if(r.ex)r.ex.forEach(d=>skip.add(d));});
+  const days=[];for(let d=start;d<=maxDay;d++)if(!skip.has(d))days.push(d);const k=days.length;if(k<14)return V.rho;
+  const tot=new Array(k).fill(0);let sv=0,ssd=0;
+  ds.forEach(r=>{const m=ORD.get(r.key),a=days.map(d=>(m&&m.get(d))||0);
+    const mu=a.reduce((x,y)=>x+y,0)/k,v=a.reduce((x,y)=>x+(y-mu)*(y-mu),0)/(k-1);sv+=v;ssd+=Math.sqrt(v);a.forEach((q,i)=>tot[i]+=q);});
+  const mt=tot.reduce((x,y)=>x+y,0)/k,vt=tot.reduce((x,y)=>x+(y-mt)*(y-mt),0)/(k-1),den=ssd*ssd-sv;
   return den>0?Math.max(0,Math.min(1,(vt-sv)/den)):V.rho;
 }
 function fileRange(rows,col){let a=Infinity,b=-Infinity;rows.slice(1).forEach(r=>{const d=parseDay(r[col]);if(d!=null){if(d<a)a=d;if(d>b)b=d;}});return isFinite(a)?[a,b]:null;}
-function dropRange(map,r){if(!r)return;map.forEach(m=>{[...m.keys()].forEach(d=>{if(d>=r[0]&&d<=r[1])m.delete(d);});});}
+function dropRange(map,r,only){if(!r)return;map.forEach((m,k)=>{if(only&&!only.has(k.split('\t')[1]))return;[...m.keys()].forEach(d=>{if(d>=r[0]&&d<=r[1])m.delete(d);});});}
 
 /* #1 #10 control tower: every selling store item is refilled; A first when short; store stock above its reorder point is credited to the warehouse */
 function towerCalc(){
@@ -1500,7 +1327,10 @@ function capCalc(){
   const full=Math.min(B,Math.floor((M.maxDay-M.minDay+1)/30));if(full<1)return {full:0,fams:[]};
   ORD.forEach((m,key)=>{const sku=key.split('\t')[0],cat=skuCat.get(sku)||'Uncategorised';if(!cats.has(cat))cats.set(cat,new Array(B).fill(0));const a=cats.get(cat),r=M.byKey.get(key);
     if(r&&r.bulk){for(let b=0;b<full;b++)a[b]+=r.d*30;return;}
-    m.forEach((q,d)=>{const b=Math.floor((M.maxDay-d)/30);if(b<B)a[b]+=q;});});
+    const ch=key.split('\t')[1],ex=new Set([...(r&&r.ex?r.ex:[]),...evDays(ch,M.maxDay-B*30+1,M.maxDay)]),sum=new Array(B).fill(0),off=new Array(B).fill(0);
+    ex.forEach(d=>{const b=Math.floor((M.maxDay-d)/30);if(b>=0&&b<B)off[b]++;});
+    m.forEach((q,d)=>{const b=Math.floor((M.maxDay-d)/30);if(b<B&&!ex.has(d))sum[b]+=q;});
+    for(let b=0;b<B;b++)a[b]+=off[b]<=20?sum[b]*30/(30-off[b]):sum[b];});
   const n=Math.min(V.fMonths,full),T=towerCalc(),trig=new Map(T.hubTrig.map(h=>[h.sku,h])),st=new Map();S.stock.forEach(x=>{if(x.node==='Hub')st.set(x.sku,x);});
   const fams=[...cats].map(([cat,a])=>{const hist=a.slice(0,full),fc=hist.slice(0,n).reduce((x,y)=>x+y,0)/n*(1+V.growth/100);
     const hs=[...M.hub.values()].filter(h=>(skuCat.get(h.sku)||'Uncategorised')===cat&&h.dTot>0);
