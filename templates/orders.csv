@@ -1,0 +1,4 @@
+order_date,sku,channel,quantity,status
+2026-11-20,BP-001,Amazon,2,Shipped
+2026-11-20,BP-001,Store Sky City,1,Delivered
+2026-11-20,BP-001,Blinkit,24,PO received
