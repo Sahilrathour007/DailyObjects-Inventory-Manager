@@ -1,0 +1,1 @@
+# DailyObjects-Inventory-Manager
