@@ -31,7 +31,7 @@ Then open http://localhost:8000. It opens with invented example data so every sc
 |---|---|
 | Overview | Six headline numbers, stock health, contribution by channel, where the cash sits, biggest cash traps, and a "needs attention" list |
 | Today | Daily run sign-off (stock by 10:00, make list by 11:00, dispatch by 15:00), warehouse days of cover, refills from the warehouse, the warehouse make-or-buy list, and stock to cut |
-| Availability | Availability today's stock supports vs target, and the units and ₹ to close each gap |
+| Availability | Four views (warehouse, marketplaces, retail stores, dark stores) of each product's availability now vs target. Least available first; red marks products that run out before stock can land or sit 10+ points below target |
 | Stores | Stock and refills per store, store detail by SKU, and what quick commerce should keep ready for the next purchase order |
 | Products & channels | SKUs listed on each marketplace, classes by margin and volume, class overrides, and margin by channel |
 | Hub & production | Pooled safety stock, measured channel correlation, and production vs sales per day |

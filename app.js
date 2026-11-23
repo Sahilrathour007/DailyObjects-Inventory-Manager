@@ -810,10 +810,8 @@ position = on hand + in transit</div></div>`+strip('avail');
   if(!A.has)return head7+`<div class="note">Upload a stock file (SKU, location, on hand, in transit) to see current availability.</div><div class="row"><button class="btn pri" data-act="pick" data-k="stock">Upload stock</button></div>`;
   const cl=(a,t)=>`<span class="${a*100>=t?'ok':'bad'}">${(a*100).toFixed(1)}%</span>`;
   const hr=A.hub.filter(o=>o.tg>0).sort((a,b)=>(b.tg-b.a*100)-(a.tg-a.a*100)).slice(0,300).map(o=>`<tr>${td(esc(o.sku))}${td(esc(o.s.name),'wrapc')}${td(chip(o.h.best))}${td(fi(o.pos),'n')}${td(o.has?f1(o.doc):'<span class="amber">no row</span>','n')}${td(o.tg+'%','n')}${td(cl(o.a,o.tg),'n')}${td(fi(o.gapU),'n')}${td(inr(o.gapV),'n')}${td(esc(o.direct.join(', ')),'wrapc')}</tr>`);
-  const nr=A.nodes.sort((a,b)=>(b.tg-b.e*100)-(a.tg-a.e*100)).slice(0,400).map(o=>`<tr>${td(esc(o.sku))}${td(esc(o.s.name),'wrapc')}${td(esc(o.ch))}${td(fi(o.pos),'n')}${td(isFinite(o.doc)?f1(o.doc):'–','n')}${td(o.tg+'%','n')}${td((o.aN*100).toFixed(1)+'%','n')}${td((o.aH*100).toFixed(1)+'%','n')}${td(cl(o.e,o.tg),'n')}${td(o.ok?'':o.lim)}${td(fi(o.gapU),'n')}${td(inr(o.gapV),'n')}</tr>`);
   return head7+`<div class="kpis"><div class="kpi"><b>${A.hubOk}/${A.hub.length}</b><span>warehouse SKUs at target</span></div><div class="kpi"><b>${A.nodeOk}/${A.nodes.length}</b><span>store and dark-store positions at target</span></div><div class="kpi"><b>${inrC(A.gapV)}</b><span>stock (at COGS) to buy or move to reach every target</span></div><div class="kpi"><b>${fi(A.lost)}</b><span>units/month at risk from stock-outs (rough)</span></div></div>
   <div class="card"><div class="row"><h3>Company warehouse, by SKU</h3><span class="spacer"></span><button class="btn" data-act="expAvail">Export CSV</button></div>${table([['SKU'],['Name'],['Best class'],['Position','n'],['Days of cover','n'],['Target','n'],['Availability now','n'],['Units to target','n'],['Cost to target','n'],['Serves directly']],hr,'No SKUs with a target.')}</div>
-  <div class="card"><h3>Dark stores and retail stores</h3>${table([['SKU'],['Name'],['Location'],['Position','n'],['Days of cover','n'],['Target','n'],['Node alone','n'],['Warehouse','n'],['End to end','n'],['Limited by'],['Units to target','n'],['Cost to target','n']],nr,'No node positions. Check that a class A listing exists on a dark store or retail store.')}</div>
   ${A.hidden?`<div class="note">${A.hidden} quick-commerce positions are left out because their stock is not visible to us.</div>`:''}
   <div class="note">Read this as “the share of lead-time cycles with no stock-out”, not as fill rate. It assumes demand is roughly normal, lead time is fixed, and node and warehouse shortfalls are independent (so the end-to-end figure is a product, which is conservative). Lead times and σ come from your variables and order history.</div>`;
 }
@@ -1129,7 +1127,7 @@ function render(){
   $('#views').innerHTML=Object.entries(VIEWS).map(([k,o])=>`<button data-go="${k}" aria-current="${v===k?'page':'false'}">${o.l}</button>`).join('');
   $('#nav').innerHTML=VIEWS[v].tabs.map(([k,l])=>`<button data-go="${k}"${UI.tab===k?' aria-current="page"':''}>${l}</button>`).join('');
   $('#status').innerHTML=S.demo?`<span class="chip k-B">Example data</span>`:SRC==='shared'?`<span class="mute small">Shared · ${canWrite?'you can edit':'view only'} · ${fi(S.skus.length)} SKUs</span>`:`<span class="mute small">This browser only · ${fi(S.skus.length)} SKUs</span>`;
-  const R={rules:()=>(canAdmin||SRC!=='shared'?'':'<div class="note">Only editors can change planning rules. Ask the owner if a value is wrong.</div>')+rVariables()+logCard(['vars','override']),overview:rOverview,today:rToday,avail:()=>chAvail()+rAvail(),stores:rStoresDecide,mix:rMix,hub:rHubProd,ahead:rAhead,inputs:rInputs,skus:rSkus,terms:rTerms,lead:rLead,events:rEventsDesk,};
+  const R={rules:()=>(canAdmin||SRC!=='shared'?'':'<div class="note">Only editors can change planning rules. Ask the owner if a value is wrong.</div>')+rVariables()+logCard(['vars','override']),overview:rOverview,today:rToday,avail:rAvailView,stores:rStoresDecide,mix:rMix,hub:rHubProd,ahead:rAhead,inputs:rInputs,skus:rSkus,terms:rTerms,lead:rLead,events:rEventsDesk,};
   const y=window.scrollY;$('#main').innerHTML=(R[UI.tab]||rOverview)();window.scrollTo(0,y);
   if(SRC==='shared'&&!canAdmin)$('#main').querySelectorAll('[data-v],[data-ov]').forEach(e=>e.disabled=true);
   if(RO())$('#main').querySelectorAll('input:not([type=file]):not(#q):not(#skuQ),select:not([data-f]),[data-act=pick],[data-act=clr],[data-act=addSku],[data-act=delSku],[data-act=addChannel],[data-act=addEv],[data-act=delEv]').forEach(e=>e.disabled=true);
@@ -1231,6 +1229,64 @@ function rListings(){
    ${table([['SKU'],['Name'],['Family'],['Class'],['Units / month','n'],['Price','n'],['CM / unit','n'],['CM %','n'],['Contribution / month','n'],['Stock-out days','n'],['What to do']],rows,'No SKUs match.')}
    <p class="small mute">${hasFile?'Includes SKUs from the listings file that sold nothing.':'Shows SKUs with orders on this channel. Listings that sold nothing appear only once the data desk uploads a listings file (SKU, channel).'}</p></div>`;
 }
+
+/* ================= Availability by channel, store and dark store ================= */
+// Status: red = will run out before new stock can land (days of cover < lead time) or 10+ points below target; amber = below target; green = at target.
+function avStatus(a,tg,doc,L){return (a*100<tg-10||doc<L)?'red':a*100<tg?'amb':'grn';}
+function avRows(kind){
+  const A=availCalc();if(!A.has)return null;
+  const hub=new Map(A.hub.map(o=>[o.sku,o])),node=new Map(A.nodes.map(o=>[o.sku+'\t'+o.ch,o])),out=[];
+  M.rows.filter(r=>r.units>0).forEach(r=>{
+    const t=r.chO.type,ho=hub.get(r.sku);
+    const k=t==='Retail store'?'store':t==='Quick commerce'?'dark':!r.chO.node?'mkt':null;
+    if(k!==kind||!ho)return;
+    const no=node.get(r.key),tg=r.target||ho.tg||V.tC;let o;
+    if(k==='mkt')o={a:ho.a,pos:ho.pos,doc:ho.doc,L:V.hubL,lim:'Warehouse',src:'warehouse'};
+    else if(no)o={a:no.e,pos:no.pos,doc:Math.min(no.doc,ho.doc),L:no.n.L,aN:no.aN,aH:no.aH,lim:no.aH<no.aN?'Warehouse':'Shelf',src:'node'};
+    else o={a:ho.a,pos:ho.pos,doc:ho.doc,L:V.hubL,lim:k==='dark'?'Warehouse (no platform data)':'Warehouse',src:'warehouse'};
+    if(k==='dark'&&r.bulk)o.ready=r.bm+(r.z||0)*r.bsd;
+    o.r=r;o.ch=r.ch;o.sku=r.sku;o.s=r.s;o.cls=r.cls;o.d=r.d;o.tg=tg;o.risk=r.d*30*(1-o.a);o.st=avStatus(o.a,tg,o.doc,o.L);
+    out.push(o);
+  });
+  return out.sort((x,y)=>x.a-y.a||y.risk-x.risk);
+}
+const AVT=[['wh','Warehouse'],['mkt','Marketplaces'],['store','Retail stores'],['dark','Dark stores']];
+function rAvailView(){
+  if(!UI.avTab)UI.avTab='wh';UI.avCh=UI.avCh||{};
+  const counts={};AVT.slice(1).forEach(([k])=>{const rs=avRows(k);counts[k]=rs?rs.filter(o=>o.st==='red').length:0;});
+  const sub=`<div class="chips avt" role="group" aria-label="Availability view">${AVT.map(([k,l])=>`<button data-avt="${k}" aria-pressed="${UI.avTab===k}">${l}${k!=='wh'&&counts[k]?` <span class="ct red">${counts[k]} red</span>`:''}</button>`).join('')}</div>`;
+  if(UI.avTab==='wh')return sub+chAvail()+rAvail();
+  if(!M.has)return sub+noData();
+  const rows=avRows(UI.avTab);if(!rows)return sub+`<div class="note">The data desk needs to upload a stock file to see availability.</div>`;
+  const kind=UI.avTab,chs=[...new Set(rows.map(o=>o.ch))];
+  if(!chs.length)return sub+`<p class="mute">No selling listings here.</p>`;
+  const sel=chs.includes(UI.avCh[kind])?UI.avCh[kind]:'All';UI.avCh[kind]=sel;
+  const by=c=>rows.filter(o=>o.ch===c),n=(rs,s)=>rs.filter(o=>o.st===s).length;
+  const chart=chartCard(kind==='mkt'?'Products by availability, per marketplace':kind==='store'?'Products by availability, per store':'Products by availability, per platform','count of listed products; red first',
+    bars(chs.map(c=>{const rs=by(c);return {l:c,segs:[[n(rs,'red'),COL.red,n(rs,'red')+' red'],[n(rs,'amb'),COL.amb,n(rs,'amb')+' below target'],[n(rs,'grn'),COL.grn,n(rs,'grn')+' at target']],txt:`${n(rs,'red')} / ${rs.length}`};}).sort((a,b)=>parseInt(b.txt)-parseInt(a.txt)),{aria:'Availability by location'})+
+    lg([[COL.red,'Runs out before stock can land, or 10+ points below target'],[COL.amb,'Below target'],[COL.grn,'At target']]));
+  const show=sel==='All'?rows:by(sel);
+  const pick=`<div class="chips">${['All',...chs].map(c=>{const rs=c==='All'?rows:by(c),red=n(rs,'red');return `<button data-avch="${esc(c)}" aria-pressed="${c===sel}">${esc(c)} <span class="ct${red?' red':''}">${red?red+' red':rs.length}</span></button>`;}).join('')}</div>`;
+  const tr=show.slice(0,400).map(o=>`<tr class="${o.st==='red'?'rowred':''}">${sel==='All'?td(esc(o.ch)):''}${td(esc(o.sku))}${td(esc(o.s.name),'wrapc')}${td(chip(o.cls))}${td(f1(o.d),'n')}${td(fi(o.pos),'n')}${td(isFinite(o.doc)?f1(o.doc):'–','n')}${td(o.L%1?f1(o.L):fi(o.L),'n')}
+    ${td(`<span class="avbar"><i style="width:${Math.max(2,o.a*100)}%;background:${o.st==='red'?COL.red:o.st==='amb'?COL.amb:COL.grn}"></i></span> <b class="${o.st==='red'?'bad':o.st==='amb'?'amber':'ok'}">${(o.a*100).toFixed(1)}%</b>`,'n')}${td(o.tg+'%','n')}
+    ${kind!=='mkt'?td(o.src==='node'?`${(o.aN*100).toFixed(0)}% / ${(o.aH*100).toFixed(0)}%`:'–','n'):''}${kind!=='mkt'?td(esc(o.lim)):''}${kind==='dark'?td(isFinite(o.ready)?fi(o.ready):'–','n'):''}${td(fi(o.risk),'n')}
+    ${td(`<span class="chip ${o.st==='red'?'k-X':o.st==='amb'?'k-B':'k-A'}">${o.st==='red'?'Critical':o.st==='amb'?'Below target':'OK'}</span>`)}</tr>`);
+  const heads=[...(sel==='All'?[['Location']]:[]),['SKU'],['Name'],['Class'],['Sells / day here','n'],['Stock position','n'],['Days of cover','n'],['Lead time, days','n'],['Availability now','n'],['Target','n'],
+    ...(kind!=='mkt'?[['Shelf / warehouse','n'],['Limited by']]:[]),...(kind==='dark'?[['Keep ready for next PO','n']]:[]),['Units at risk / month','n'],['Status']];
+  const note=kind==='mkt'?'Website and marketplaces ship from the company warehouse, so a product\'s availability is the warehouse\'s for that product. Days of cover and lead time are the warehouse\'s (production lead time). Units at risk uses this channel\'s own sales, so the same product ranks higher where it sells more.'
+    :kind==='store'?'Each store holds its own stock. Availability = chance the shelf lasts until the next refill × chance the warehouse can refill it. Lead time is that store\'s delivery time; days of cover is the lower of shelf and warehouse.'
+    :'Dark-store stock belongs to the platform. Where you upload their inventory report, availability is shelf × warehouse. Otherwise it is the warehouse\'s readiness for the next purchase order; "Keep ready" is the order size to have on hand.';
+  return sub+chart+`<div class="card"><div class="row"><h3>${kind==='mkt'?'Availability by marketplace':kind==='store'?'Availability by store':'Availability by dark-store platform'}</h3><span class="spacer"></span><button class="btn" data-act="expAv">Export CSV</button></div>${pick}
+   <p class="small mute">Least available first. ${note}</p>
+   ${table(heads,tr,'Nothing to show.')}${show.length>400?'<p class="small mute">First 400 shown.</p>':''}</div>`;
+}
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-avt]');if(t){UI.avTab=t.dataset.avt;render();return;}
+  const c=e.target.closest('[data-avch]');if(c){UI.avCh[UI.avTab]=c.dataset.avch;render();return;}
+  if(e.target.closest('[data-act=expAv]')){const rs=(avRows(UI.avTab)||[]).filter(o=>UI.avCh[UI.avTab]==='All'||o.ch===UI.avCh[UI.avTab]);
+    saveCSV('availability_'+UI.avTab+'.csv',[['location','sku','name','class','sells_per_day','position','days_of_cover','lead_time','availability_pct','target_pct','limited_by','units_at_risk_month','status'],...rs.map(o=>[o.ch,o.sku,o.s.name,o.cls,o.d.toFixed(2),Math.round(o.pos),isFinite(o.doc)?o.doc.toFixed(1):'',o.L,(o.a*100).toFixed(1),o.tg,o.lim,Math.round(o.risk),o.st==='red'?'Critical':o.st==='amb'?'Below target':'OK'])]);}
+});
+
 document.addEventListener('click',e=>{const b=e.target.closest('[data-lch]');if(b){UI.lch=b.dataset.lch;render();}
   const x=e.target.closest('[data-act=expList]');if(x){const L=listingsFor(UI.lch);saveCSV('listings_'+UI.lch.replace(/\W+/g,'_')+'.csv',[['sku','name','family','class','units_per_month','cm_per_unit','status'],...L.map(o=>[o.sku,o.s.name,o.s.cat||'',o.cls,o.r?o.r.units.toFixed(1):0,o.r?Math.round(o.r.cm):'',o.src])]);}});
 document.addEventListener('change',e=>{if(e.target.id==='lq'){UI.lq=e.target.value;render();}});
