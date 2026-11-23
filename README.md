@@ -32,7 +32,7 @@ Then open http://localhost:8000. It opens with invented example data so every sc
 | Overview | Units short in the next 14 days, make-or-buy and refill counts, availability on target, cash above max and stock held; then a "needs attention" list (worst five shortfalls first), stock health, where the cash sits and the biggest cash traps |
 | Today | Daily run sign-off (stock by 10:00, make list by 11:00, dispatch by 15:00), warehouse days of cover, refills from the warehouse, the warehouse make-or-buy list, and stock to cut |
 | Availability | Four views (warehouse, marketplaces, retail stores, dark stores) of each product's availability now vs target. Least available first; red marks products that run out before stock can land or sit 10+ points below target |
-| Stores | Stock and refills per store, store detail by SKU, and what quick commerce should keep ready for the next purchase order |
+| Stores | One card per retail store (worst first) and per dark-store platform. Click a card to see only that store's or platform's SKUs: refills first, then lowest days of cover |
 | Products & channels | SKUs listed on each marketplace, classes and class overrides, and margin by channel for channels whose cost terms finance has confirmed |
 | Hub & production | Warehouse safety stock, reorder point and order-up-to per SKU, and production vs sales per day |
 | Sales & next month | Stock and profit check for each sale event, plus next month's production by family, net of stock held |

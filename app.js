@@ -643,14 +643,6 @@ function rHub(){
   `  <div class="card"><h3>Hub stock by SKU</h3>${table([['SKU'],['Name'],['Best class'],['Sold / day','n'],['Safety stock','n'],['Reorder point','n'],['Order-up-to','n']],rows)}
   <p class="mute small">Reorder point = d × hub lead time + safety stock. Order-up-to adds the production cycle. Cycle stock from batch sizes is not modelled.</p></div>`;
 }
-function bulkCard(){
-  const rs=M.rows.filter(r=>r.bulk&&r.units>0&&r.z!=null).sort((a,b)=>b.units-a.units).slice(0,300);
-  const rows=rs.map(r=>`<tr>${td(esc(r.sku))}${td(esc(r.s.name),'wrapc')}${td(esc(r.ch))}${td(chip(r.cls))}${td(r.B,'n')}${td(r.nb,'n')}${td(fi(r.bm),'n')}${td(fi(r.bsd),'n')}${td(fi(r.bm+r.z*r.bsd),'n')}${td(isFinite(r.last)?dayStr(r.last):'–','n')}${td(isFinite(r.since)?r.since:'–','n')}</tr>`);
-  return `<div class="card"><h3>Bulk-order channels: what to keep ready for the next purchase order</h3>
-   <p>Quick commerce buys in bulk, so the brand sees purchase orders, not consumer sales per day. These figures come from order-cycle totals. “Keep ready” is the average cycle order plus z × the spread of cycle orders, so one purchase order at the target service level can be filled from the warehouse. Their dark-store stock is theirs; this is what the warehouse must be able to ship.</p>
-   ${table([['SKU'],['Name'],['Channel'],['Class'],['Cycle, days','n'],['Cycles in window','n'],['Avg per cycle','n'],['Spread (σ) per cycle','n'],['Keep ready','n'],['Last order','n'],['Days since','n']],rows,'No quick-commerce listings with orders. Mark a channel “Bulk purchase orders” under Variables.')}
-   <p class="mute small">Few cycles in the window make the spread unreliable; raise the trailing window if “Cycles in window” is below about 4.</p></div>`;
-}
 
 
 
@@ -821,35 +813,6 @@ function storeCalc(){
     return {s,ci,c,rs,dSum,units:rs.reduce((a,r)=>a+r.units,0),winUnits:dSum*M.W,nodes,extra,on,tr,val,pos:on+tr,doc:dSum>0?(on+tr)/dSum:Infinity,
       ropSum:nodes.reduce((a,n)=>a+n.rop,0),below:nodes.filter(n=>n.below).length,need:nodes.reduce((a,n)=>a+n.need,0),hasStock:stk.length>0};
   });
-}
-function rStores(){
-  const D=storeCalc();
-  const sel=UI.storeSel||'All';
-  const sum=D.map(o=>{const L=o.c.L,idx=o.ci;
-    return `<tr>${td(esc(o.s.name),'wrapc')}${td(esc(o.s.city))}
-     ${td(L,'n')}
-     ${td(o.rs.length?fi(o.winUnits):'<span class="mute">no orders</span>','n')}${td(o.rs.length?fi(o.units):'–','n')}${td(o.rs.length||'–','n')}${td(o.nodes.length||'–','n')}
-     ${td(o.hasStock?fi(o.on):'<span class="mute">no stock</span>','n')}${td(o.hasStock?fi(o.tr):'–','n')}${td(o.hasStock?inr(o.val):'–','n')}
-     ${td(isFinite(o.doc)&&o.hasStock?f1(o.doc):'–','n')}${td(o.nodes.length?fi(o.ropSum):'–','n')}
-     ${td(o.nodes.length&&o.hasStock?(o.below?`<span class="bad">${o.below}</span>`:'<span class="ok">0</span>'):'–','n')}${td(o.nodes.length&&o.hasStock?fi(o.need):'–','n')}</tr>`;});
-  const tot=D.reduce((a,o)=>({on:a.on+o.on,tr:a.tr+o.tr,u:a.u+o.units,val:a.val+o.val,rop:a.rop+o.ropSum,need:a.need+o.need}),{on:0,tr:0,u:0,val:0,rop:0,need:0});
-  const picks=D.filter(o=>sel==='All'||o.s.ch===sel);
-  const dr=[];picks.forEach(o=>[...o.nodes,...o.extra].forEach(n=>dr.push([o,n])));
-  dr.sort((a,b)=>(a[0].s.city+a[0].s.ch).localeCompare(b[0].s.city+b[0].s.ch)||(b[1].d-a[1].d));
-  const detail=dr.slice(0,500).map(([o,n])=>`<tr>${sel==='All'?td(esc(o.s.ch)):''}${td(esc(n.sku))}${td(esc(n.s.name),'wrapc')}${td(chip(n.cls))}${td(f2(n.d),'n')}${td(f2(n.sig),'n')}${td(n.L,'n')}${td(isFinite(n.ss)?f1(n.ss):'–','n')}${td(isFinite(n.rop)?fi(n.rop):'–','n')}${td(isFinite(n.up)?fi(n.up):'–','n')}${td(fi(n.on),'n')}${td(fi(n.tr),'n')}${td(fi(n.pos),'n')}${td(isFinite(n.doc)?f1(n.doc):'–','n')}
-    ${td(!isFinite(n.rop)?'<span class="mute">not a shelf item</span>':!n.has?'<span class="amber">no stock row</span>':n.below?'<span class="bad">Refill</span>':'<span class="ok">OK</span>')}${td(isFinite(n.rop)?fi(n.need):'–','n')}</tr>`);
-  const list=STORES.map(s=>`<tr>${td(esc(s.name),'wrapc')}${td(esc(s.city))}${td(esc(s.fmt))}${td(esc(s.addr),'wrapc')}${td(esc(s.hours))}${td(esc(s.phone))}${td(s.rating.toFixed(1)+' ('+fi(s.rc)+')','n')}${td((S.channels.find(c=>c.name===s.ch)||{disc:NaN}).disc+'%','n')}${td(`<a href="https://www.google.com/maps/place/?q=place_id:${esc(s.pid)}" target="_blank" rel="noopener">Open in Maps</a>`)}</tr>`);
-  return `<div class="card"><h2>Retail stores</h2><p>${STORES.length} DailyObjects stores in ${new Set(STORES.map(x=>x.city)).size} cities, taken from a Google Maps search on 23 Nov 2026. Each store is its own stock location: the company warehouse refills every item it sells, at the target for that item's class. Marketplaces and the website hold no stock of their own. Orders for a store come in the normal orders upload with the store name in the channel column; stock comes in the stock file with the store name as location.</p>
-</div>
-  ${strip('stores')}
-  <div class="card"><div class="row"><h3>Every store: orders, inventory, lead time and reorder point</h3><span class="spacer"></span><button class="btn" data-act="expStores">Export CSV</button></div>
-   <p class="mute small">Lead time is the days from the warehouse to that store, door to door. It is edited on the data desk (Store delivery times). The starting values are placeholders by city (Delhi and Gurugram 1, Mumbai 3, Bengaluru, Pune and Hyderabad 4, Chennai 5) that assume the warehouse is in Delhi NCR, so replace them with your transporter’s real times, airports especially. Dark stores use one average (see the variable above). “Reorder point” adds up the reorder points of every item the store sells: ROP = d × lead time + z × σ × √lead time. Refill is due when on hand plus in transit is at or below it.</p>
-   ${table([['Store'],['City'],['Lead time, days','n'],['Units sold, last '+M.W+' days','n'],['Units / month','n'],['Selling listings','n'],['Shelf items','n'],['On hand','n'],['In transit','n'],['Stock at COGS','n'],['Days of cover','n'],['Reorder point, units','n'],['Items at / below ROP','n'],['Units to refill','n']],sum)}
-   <p class="small"><b>All stores:</b> ${fi(tot.on)} on hand, ${fi(tot.tr)} in transit, ${inrC(tot.val)} at COGS, ${fi(tot.u)} units a month, reorder points total ${fi(tot.rop)} units, ${fi(tot.need)} units to refill.</p></div>
-  <div class="card"><div class="row"><h3>Store detail by SKU</h3><span class="spacer"></span><label for="storeSel" class="mute small">Store</label>
-   <select id="storeSel" data-f="storeSel"><option>All</option>${STORES.map(x=>`<option value="${esc(x.ch)}"${sel===x.ch?' selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
-   ${table([...(sel==='All'?[['Store']]:[]),['SKU'],['Name'],['Class'],['Sold / day','n'],['σ / day','n'],['Lead time','n'],['Safety stock','n'],['Reorder point','n'],['Order-up-to','n'],['On hand','n'],['In transit','n'],['Position','n'],['Days of cover','n'],['Status'],['Refill qty','n']],detail,'No shelf items for this store yet. Load orders with this store name in the channel column.')}</div>
-`;
 }
 
 
@@ -1029,9 +992,44 @@ function rToday(){
    <p class="mute small">Stock above its order-up-to level, stock with no sales in ${V.W} days, and store stock of items that are not shelf (A) items there. Pause production of these, push them on the channel that sells them best, or pull store stock back to the warehouse. Total ${inrC(E.v)} at COGS.</p>
    ${table([['SKU'],['Name'],['Location'],['Sold / day','n'],['Position','n'],['Order-up-to','n'],['Excess units','n'],['Excess at COGS','n'],['Why']],ex,'Nothing is above its max level.')}${E.rows.length>15?`<div class="row"><button class="btn" data-act="exAll">${UI.exAll?'Show top 15':'Show all '+E.rows.length}</button></div>`:''}</div>`;
 }
+// Stores tab: one card per store / platform; a store's SKUs appear only when it is picked
 function rStoresDecide(){
-  return chStores()+rStores()+bulkCard();
+  if(!M.has)return noData();
+  const v=UI.stView||'store',sub=`<div class="chips avt">${[['store','Retail stores'],['dark','Dark-store platforms']].map(([k,l])=>`<button data-stv="${k}" aria-pressed="${v===k}">${l}</button>`).join('')}</div>`;
+  return sub+(v==='store'?storeCards():darkCards());
 }
+function storeCards(){
+  const D=storeCalc().filter(o=>o.rs.length||o.hasStock),sel=D.find(o=>o.s.ch===UI.stSel);
+  if(!D.length)return '<p class="mute">No store sales or stock loaded.</p>';
+  const cards=D.sort((a,b)=>(b.below/(b.nodes.length||1))-(a.below/(a.nodes.length||1))).map(o=>{const sh=o.nodes.length?o.below/o.nodes.length:0,c=!o.hasStock?'':sh>=.5?'red':sh>0?'amb':'grn';
+    return `<button class="scard ${c}" data-stsel="${esc(o.s.ch)}" aria-pressed="${sel===o}"><b>${esc(o.s.ch.replace(/^Store /,''))}</b><span class="mute small">${esc(o.s.city)} · ${esc(o.s.fmt)} · ${o.c.L} day${o.c.L===1?'':'s'} away</span>
+      <span>${o.hasStock?`<b class="${o.below?'bad':'ok'}">${o.below}</b> of ${o.nodes.length} SKUs need a refill`:'<span class="amber">No stock uploaded</span>'}</span>
+      <span class="small">${o.hasStock?`${fi(o.need)} units to send · ${inrC(o.val)} held · ${isFinite(o.doc)?f1(o.doc):'–'} days of cover`:`${fi(o.units)} units a month`}</span></button>`;}).join('');
+  let h=`<div class="card"><div class="row"><h2>Retail stores</h2><span class="mute small">worst first · pick a store to see its SKUs</span><span class="spacer"></span><button class="btn" data-act="expStores">Export CSV</button></div><div class="scards">${cards}</div></div>`;
+  if(!sel)return h+strip('stores');
+  const items=[...sel.nodes,...sel.extra].sort((a,b)=>(b.below-a.below)||(a.doc-b.doc));
+  const tr=items.map(n=>`<tr class="${n.below?'rowred':''}">${td(esc(n.sku))}${td(esc(n.s.name),'wrapc')}${td(chip(n.cls))}${td(f1(n.d),'n')}${td(isFinite(n.rop)?fi(n.rop):'–','n')}${td(isFinite(n.up)?fi(n.up):'–','n')}${td(fi(n.on),'n')}${td(fi(n.tr),'n')}${td(isFinite(n.doc)?f1(n.doc):'–','n')}
+    ${td(!isFinite(n.rop)?'<span class="mute">No sales here</span>':!n.has?'<span class="amber">No stock row</span>':n.below?'<span class="bad">Refill</span>':'<span class="ok">OK</span>')}${td(isFinite(n.rop)&&n.need?'<b>'+fi(n.need)+'</b>':'–','n')}</tr>`);
+  return h+`<div class="card"><div class="row"><h3>${esc(sel.s.ch)}</h3><span class="mute small">${esc(sel.s.addr)}</span><span class="spacer"></span><button class="btn" data-stsel="">Close</button></div>
+   <p class="small">${sel.below} of ${sel.nodes.length} SKUs at or below reorder point · ${fi(sel.need)} units to send · delivery ${sel.c.L} day${sel.c.L===1?'':'s'}. Refills first, then lowest days of cover.</p>
+   ${table([['SKU'],['Name'],['Class'],['Sold / day','n'],['Reorder point','n'],['Order-up-to','n'],['On hand','n'],['In transit','n'],['Days of cover','n'],['Status'],['Send','n']],tr,'No SKUs at this store.')}</div>`+strip('stores');
+}
+function darkCards(){
+  const rs=M.rows.filter(r=>r.bulk&&r.units>0&&r.z!=null),chs=[...new Set(rs.map(r=>r.ch))],sel=chs.includes(UI.dkSel)?UI.dkSel:null;
+  if(!chs.length)return '<p class="mute">No quick-commerce purchase orders loaded.</p>';
+  const ready=r=>r.bm+r.z*r.bsd;
+  const cards=chs.map(c=>{const x=rs.filter(r=>r.ch===c),last=Math.max(...x.map(r=>r.last)),since=M.maxDay-last;
+    return `<button class="scard ${since>14?'amb':''}" data-dksel="${esc(c)}" aria-pressed="${sel===c}"><b>${esc(c)}</b><span class="mute small">platform-owned stock · ${V.dsL} day${V.dsL===1?'':'s'} to dark store</span>
+      <span><b>${x.length}</b> SKUs ordered</span><span class="small">${fi(x.reduce((a,r)=>a+ready(r),0))} units to keep ready · last PO ${dayStr(last)}${since>14?' <span class="amber">('+since+' days ago)</span>':''}</span></button>`;}).join('');
+  let h=`<div class="card"><div class="row"><h2>Dark-store platforms</h2><span class="mute small">pick a platform to see its SKUs</span></div><div class="scards">${cards}</div>
+   <p class="small mute">The platforms buy in bulk purchase orders and own the dark-store stock. "Keep ready" is the order size the warehouse must be able to ship at the target service level.</p></div>`;
+  if(!sel)return h;
+  const tr=rs.filter(r=>r.ch===sel).sort((a,b)=>ready(b)-ready(a)).map(r=>`<tr>${td(esc(r.sku))}${td(esc(r.s.name),'wrapc')}${td(chip(r.cls))}${td(r.B,'n')}${td(fi(r.bm),'n')}${td(fi(r.bsd),'n')}${td('<b>'+fi(ready(r))+'</b>','n')}${td(dayStr(r.last),'n')}${td(r.since,'n')}</tr>`);
+  return h+`<div class="card"><div class="row"><h3>${esc(sel)}</h3><span class="spacer"></span><button class="btn" data-dksel="">Close</button></div>
+   ${table([['SKU'],['Name'],['Class'],['PO cycle, days','n'],['Avg per PO','n'],['Spread per PO','n'],['Keep ready','n'],['Last PO','n'],['Days since','n']],tr)}</div>`;
+}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-stv],[data-stsel],[data-dksel]');if(!b)return;
+  if(b.dataset.stv!==undefined)UI.stView=b.dataset.stv;else if(b.dataset.stsel!==undefined)UI.stSel=b.dataset.stsel;else UI.dkSel=b.dataset.dksel;render();});
 function rMix(){
   const tot=S.channels.filter(c=>c.conf).map(c=>{const r=M.rows.filter(x=>x.ch===c.name&&x.ok);const u=r.reduce((a,x)=>a+x.units,0);if(!u)return null;
     const nr=r.reduce((a,x)=>a+x.units*x.e.NR,0),gm=r.reduce((a,x)=>a+x.units*x.e.gm,0),cm=r.reduce((a,x)=>a+x.units*x.cm,0);return {c,u,gmp:gm/nr,cmp:cm/nr,cm,cmu:cm/u};}).filter(Boolean);
@@ -1183,12 +1181,6 @@ function chAvail(){
   const rs=A.hub.filter(o=>o.tg>0).sort((a,b)=>(a.a*100-a.tg)-(b.a*100-b.tg)).slice(0,20);
   return chartCard('Availability now vs target','20 warehouse SKUs furthest below target; tick = target',bars(rs.map(o=>({l:o.sku,lh:`${esc(o.sku)} <span class="mute">${chip(o.h.best)}</span>`,v:o.a*100,c:o.a*100>=o.tg?COL.grn:o.a*100>=o.tg-10?COL.amb:COL.red,m:o.tg,mt:`target ${o.tg}%`,txt:(o.a*100).toFixed(0)+'%',t:`${o.s.name}: ${(o.a*100).toFixed(1)}% now, target ${o.tg}%`})),{max:100,aria:'Availability vs target'})+
    lg([[COL.red,'More than 10 points short'],[COL.amb,'Within 10 points'],[COL.grn,'At target'],['var(--ink)','Target']]));
-}
-function chStores(){
-  const D=storeCalc().filter(o=>o.hasStock||o.rs.length);if(!D.length)return '';
-  const rs=D.sort((a,b)=>b.val-a.val);
-  return chartCard('Stores: stock held and refills due','bar = stock at COGS; colour = share of shelf items at or below reorder point',bars(rs.map(o=>{const sh=o.nodes.length?o.below/o.nodes.length:0;return {l:o.s.ch.replace(/^Store /,''),v:o.val,c:sh>=.5?COL.red:sh>0?COL.amb:COL.grn,txt:`${inrC(o.val)} · ${o.below}/${o.nodes.length||0}`,t:`${o.s.ch}: ${inrC(o.val)}, ${o.below} of ${o.nodes.length} shelf items need a refill, ${f1(o.doc)} days of cover`};}),{aria:'Stores'})+
-   lg([[COL.red,'Half or more shelf items need refill'],[COL.amb,'Some need refill'],[COL.grn,'All above reorder point']])+`<p class="small mute">Right-hand figure: items needing refill / shelf (A) items.</p>`);
 }
 
 /* ================= SKUs listed on each marketplace ================= */

@@ -128,3 +128,7 @@ details p{margin-top:6px}
 tr.rowred td{background:var(--x-bg)}
 .avbar{display:inline-block;vertical-align:middle;width:60px;height:8px;background:var(--soft);border-radius:4px;overflow:hidden}
 .avbar i{display:block;height:100%}
+.scards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.scard{font:inherit;color:inherit;text-align:left;cursor:pointer;background:var(--bg);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px}
+.scard:hover{border-color:var(--accent)} .scard[aria-pressed="true"]{outline:2px solid var(--accent);background:var(--panel)}
+.scard.red{border-left-color:var(--x)} .scard.amb{border-left-color:var(--b)} .scard.grn{border-left-color:var(--a)}
