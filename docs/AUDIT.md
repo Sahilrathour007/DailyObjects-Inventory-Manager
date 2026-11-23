@@ -46,3 +46,19 @@ Fifteen issues found in the planner and fixed. Figures are from the built-in exa
 | 23 | An interrupted upload left orphaned pieces in the shared store | Pieces older than the current version and over 10 minutes old are deleted on load |
 
 Nine unused or silently overridden functions were removed.
+
+## Signal vs noise, November 2026
+
+The inventory head's question is: *which SKUs will run short, where, how many units to make or move by when, and is the next sale covered?* Anything that doesn't answer it was cut or moved behind a click.
+
+Added:
+- An Overview tile for **units short in the next 14 days**, with the worst five SKUs at the top of "Needs attention", which now sits right under the tiles.
+
+Removed:
+- **Placeholder margins.** Contribution tile and chart left Overview. Margin by channel shows only finance-confirmed channels. CM figures in listing tables show "–" until terms are confirmed. Listings on unconfirmed channels are classed on volume alone, so made-up costs no longer decide A/B/C or "loses money".
+- **Pooling claims.** The "pooling saves ₹X" figures, KPIs and columns, and the correlation note. The calculation still runs; it just isn't advertised.
+- **"Units/month at risk (rough)"** on Availability.
+- **Run-out dates more than 90 days out.** 60 days of demand can't support them.
+- **The duplicate cash-trap chart** on Today. The excess table shows the top 15, with "Show all".
+- **The class-mix counts card**, the class-mix listings chart, and the rows of dashes in Derived values.
+- **Formulas** are now behind a click.

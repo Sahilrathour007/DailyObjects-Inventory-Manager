@@ -172,11 +172,11 @@ function compute(){
     rows.push({key:sku+'\t'+chn,sku,ch:chn,s,chO:ch,d,sig:sigD,bulk,B,nb,bm,bsd,last,oos:o.set.size,evN,ex:exS,oosSrc:o.src,Wn,dRaw,thin:!bulk&&Wn<Math.max(7,0.25*W),since:maxDay-last,units:d*30,ok,e,price,cm,cmPct:ok?e.cmPct:NaN,contrib:ok?d*30*cm:NaN});
   });
   // thresholds per channel
-  const thr={};S.channels.forEach(c=>{thr[c.name]=percentile(rows.filter(r=>r.ch===c.name&&r.ok&&r.units>0).map(r=>r.units),V.classPct);});
+  const thr={},thrMid={};S.channels.forEach(c=>{const u=rows.filter(r=>r.ch===c.name&&r.ok&&r.units>0).map(r=>r.units);thr[c.name]=percentile(u,V.classPct);thrMid[c.name]=percentile(u,V.classPct/2);});
   const tgt={A:V.tA,B:V.tB,C:V.tC},z={};['A','B','C'].forEach(k=>z[k]=invNorm(tgt[k]/100));
   rows.forEach(r=>{
     let a,sub='';
-    if(!r.ok)a='?';else if(r.units<=0)a='0';else if(r.cm<=0)a='X';
+    if(!r.ok)a='?';else if(r.units<=0)a='0';else if(!r.chO.conf){a=r.units>=thr[r.ch]?'A':r.units>=thrMid[r.ch]?'B':'C';sub='volume only';}else if(r.cm<=0)a='X';
     else{const hv=r.units>=thr[r.ch],hm=r.cmPct>=V.marginCut/100;
       if(hv&&hm)a='A';else if(hv){a='B';sub='thin';}else if(hm){a='B';sub='niche';}else a='C';}
     r.auto=a;r.sub=sub;r.cls=S.override[r.key]||a;
@@ -494,16 +494,11 @@ const td=(v,c)=>`<td class="${c||''}">${v}</td>`;
 const noData=()=>`<div class="note">No orders loaded yet. The data desk uploads them (Uploads &amp; checks).</div>`;
 
 /* ---------- renderers ---------- */
-function chanTable(){
-  const isSt=n=>STORES.some(x=>x.ch===n),rows=M.chSum.filter(c=>c.n||isSt(c.name)).map(c=>`<tr>${td(esc(c.name))}${['A','B','C','X','0','?'].map(k=>td(c[k]||'','n')).join('')}${td(fi(c.units),'n')}${td(inrC(c.contrib),'n')}</tr>`);
-  return table([['Channel'],['A','n'],['B','n'],['C','n'],['X','n'],['0','n'],['?','n'],['Units / month','n'],['Contribution / month','n']],rows,'No listings yet.')+
-   `<p class="mute small">A high volume + high margin · B high volume with thin margin, or low volume with high margin · C low on both · X negative margin · 0 no sales in window · ? missing MRP or COGS.</p>`;
-}
 function rVariables(){
   const groups=[...new Set(VARS.map(v=>v.g))];
   const derived=`<div class="tw"><table class="t"><thead><tr><th>Derived value</th><th class="n">Now</th><th>How</th></tr></thead><tbody>
    ${['A','B','C'].map(k=>`<tr>${td('z-score, class '+k)}${td(f2(M.z[k]),'n')}${td('Inverse normal of target availability '+M.tgt[k]+'%')}</tr>`).join('')}
-   ${S.channels.map(c=>`<tr>${td('High-volume cut-off, '+esc(c.name))}${td(isFinite(M.thr[c.name])?f1(M.thr[c.name]):'–','n')}${td('units / month at the '+V.classPct+'th percentile of selling listings')}</tr>`).join('')}
+   ${S.channels.filter(c=>isFinite(M.thr[c.name])).map(c=>`<tr>${td('High-volume cut-off, '+esc(c.name))}${td(isFinite(M.thr[c.name])?f1(M.thr[c.name]):'–','n')}${td('units / month at the '+V.classPct+'th percentile of selling listings')}</tr>`).join('')}
    <tr>${td('Demand window')}${td(M.has?dayStr(M.start)+' → '+dayStr(M.maxDay):'–','n')}${td('Last '+V.W+' days up to the latest order date')}</tr></tbody></table></div>`;
   const chRows=S.channels.map((c,i)=>`<tr>${td(`<input data-ch="${i}:name" value="${esc(c.name)}" aria-label="Channel name" class="w-l">`)}${td(esc(c.type))}
    ${['fee','ret','fixed','disc','L'].map(f=>td(f==='L'&&derivedL(c)?`<span class="mute" title="Edit on the data desk (Store delivery times) (stores) or under Variables (dark-store average)">${c.L} <span class="small">${c.type==='Retail store'?'edit on Retail stores':'average'}</span></span>`:`<input type="number" data-ch="${i}:${f}" value="${c[f]}" step="any" min="0" aria-label="${f}">`,'n')).join('')}
@@ -515,7 +510,7 @@ function rVariables(){
   ${groups.map(g=>`<div class="card"><h3>${esc(g)}</h3>${table([['Variable'],['Value'],['Unit'],['Source'],['What it does']],VARS.filter(v=>v.g===g).map(v=>`<tr>${td(esc(v.l))}${td(varInput(v).replace('class="var"','class="var" style="border:0;padding:0;background:none"').replace(/<label.*?<\/label>/,'').replace(/<span class="u">.*?<\/span>/,''))}${td(esc(v.u))}${td(esc(v.src||''))}${td(esc(v.h||''),'wrapc')}</tr>`),'')}</div>`).join('')}
   <div class="card"><h3>Channel terms</h3><p>Commission, delivery (normal and express), packing, returns, store costs and supply settings for every channel are on the GM &amp; CM tab, where you can see their effect on each SKU.</p><div class="row"><button class="btn pri" data-go="margin">Open GM &amp; CM</button></div></div>
   <div class="card"><h3>Derived values</h3>${derived}</div>
-  <div class="card"><h3>Formulas used</h3><div class="formula">d      = units in last W days ÷ W
+  <div class="card"><details><summary><b>Formulas used</b></summary><div class="formula">d      = units in last W days ÷ W
 σ      = standard deviation of daily units over the same W days (zero days included)
          bulk channels: σ = stdev of order-cycle totals ÷ √(cycle days); d = total ÷ covered days
 z      = inverse normal of target availability   (99% → 2.33, 97% → 1.88, 90% → 1.28)
@@ -621,14 +616,13 @@ function rSegment(){
     const rows=skus.slice(0,300).map(s=>`<tr>${td(esc(s.sku))}${td(esc(s.name),'wrapc')}${td(isFinite(s.mrp)&&isFinite(s.cogs)?inr(s.mrp-s.cogs):'–','n')}${chs.map(c=>{const r=M.byKey.get(s.sku+'\t'+c.name);return td(r?`<span title="${esc(r.place)} · ${f1(r.units)} units/mo · CM ${pc(r.cmPct)}">${chip(r.cls)} ${r.target?r.target+'%':''}</span>`:'<span class="mute">·</span>');}).join('')}</tr>`);
     body=table([['SKU'],['Name'],['GM ₹','n'],...chs.map(c=>[c.name])],rows)+`<p class="mute small">Each cell: class and target availability. Hover for placement, volume and margin. ${skus.length>300?'First 300 SKUs shown.':''}</p>`;
   }else{
-    const rows=fr.slice(0,400).map(r=>`<tr>${td(esc(r.sku))}${td(esc(r.s.name),'wrapc')}${td(esc(r.ch))}${td(inr(r.price),'n')}${td(inr(r.cm),'n')}${td(pc(r.cmPct),'n')}${td(f1(r.units),'n')}${td(r.bulk?'<span class="mute">bulk</span>':(r.oos?`<span title="${r.oos} of ${M.W} days excluded; source: ${r.oosSrc}">${r.oos} <span class="mute small">${r.oosSrc}</span></span>`:'0')+(r.thin?' <span class="amber" title="Fewer than a quarter of the window days remain after exclusions">thin</span>':''),'n')}${td(inrC(r.contrib),'n')}
+    const rows=fr.slice(0,400).map(r=>`<tr>${td(esc(r.sku))}${td(esc(r.s.name),'wrapc')}${td(esc(r.ch))}${td(inr(r.price),'n')}${td(r.chO.conf?inr(r.cm):'–','n')}${td(r.chO.conf?pc(r.cmPct):'–','n')}${td(f1(r.units),'n')}${td(r.bulk?'<span class="mute">bulk</span>':(r.oos?`<span title="${r.oos} of ${M.W} days excluded; source: ${r.oosSrc}">${r.oos} <span class="mute small">${r.oosSrc}</span></span>`:'0')+(r.thin?' <span class="amber" title="Fewer than a quarter of the window days remain after exclusions">thin</span>':''),'n')}${td(r.chO.conf?inrC(r.contrib):'–','n')}
       ${td(chip(r.cls)+(S.override[r.key]?' <span class="mute small">set by you</span>':''))}${td(r.target?r.target+'%':'–','n')}${td(r.z!=null?f2(r.z):'–','n')}${td(esc(r.place))}
       ${td(`<select data-ov="${esc(r.key)}" aria-label="Override class"><option value="">auto (${r.auto})</option>${['A','B','C','X'].map(k=>`<option${S.override[r.key]===k?' selected':''}>${k}</option>`).join('')}</select>`)}</tr>`);
     body=table([['SKU'],['Name'],['Channel'],['Price','n'],['CM / unit','n'],['CM %','n'],['Units / mo','n'],['Stock-out days','n'],['Contribution / mo','n'],['Class'],['Target','n'],['z','n'],['Placement'],['Override']],rows,'No listings match.')+`<p class="mute small">${fr.length} listings${fr.length>400?', first 400 shown':''}, sorted by contribution.</p>`;
   }
-  const delC=M.rows.filter(r=>['C','X','0'].includes(r.cls)).length,dist=M.rows.length;
   return head(1,'Segment by SKU and channel','Ch. 2 pp. 46–48, Ch. 8 p. 167, Ch. 5 p. 114',`Classes use contribution margin and volume per unit, not revenue. High-volume, high-margin listings (A) get the high availability target and stock near the customer. Low-volume, high-margin listings sit centrally and ship on order. Low-low listings are reviewed for deletion. Cutting the long tail first matters because more listings spread the same demand thinner.`)+strip('segment')+
-  `${oosCard()}<div class="card"><h3>Class mix by channel</h3>${chanTable()}<p class="small"><b>${delC}</b> of ${dist} listings (${Math.round(delC/dist*100)}%) are C, X or 0: candidates for deletion review before any stock is placed.</p></div>
+  `${oosCard()}
   <div class="card"><div class="row"><h3>SKUs by marketplace</h3><span class="spacer"></span>
    <div class="seg"><button data-view="matrix" aria-pressed="${UI.view==='matrix'}">Matrix</button><button data-view="list" aria-pressed="${UI.view==='list'}">List</button></div>
    <select data-f="segCh" aria-label="Channel filter"><option>All</option>${S.channels.map(c=>`<option${UI.segCh===c.name?' selected':''}>${esc(c.name)}</option>`).join('')}</select>
@@ -643,13 +637,11 @@ function oosCard(){
 }
 function rHub(){
   if(!M.has)return head(2,'Pool the bulk of stock in one central hub','Ch. 4 p. 85, Ch. 5 pp. 113–114','')+noData();
-  const hs=[...M.hub.values()].filter(h=>h.dTot>0).sort((a,b)=>b.saveV-a.saveV);
-  const tot=hs.reduce((o,h)=>{o.un+=h.unpooled*(isFinite(h.s.cogs)?h.s.cogs:0);o.p+=h.ss*(isFinite(h.s.cogs)?h.s.cogs:0);return o;},{un:0,p:0});
-  const rows=hs.slice(0,300).map(h=>`<tr>${td(esc(h.sku))}${td(esc(h.s.name),'wrapc')}${td(chip(h.best))}${td(f1(h.dTot),'n')}${td(f2(h.sigPool),'n')}${td(h.zHub?f2(h.zHub):'–','n')}${td(f1(h.unpooled),'n')}${td(f1(h.ss),'n')}${td(f1(h.saveU),'n')}${td(inr(h.saveV),'n')}${td(fi(h.rop),'n')}${td(fi(h.up),'n')}</tr>`);
+  const hs=[...M.hub.values()].filter(h=>h.dTot>0).sort((a,b)=>b.dTot-a.dTot);
+  const rows=hs.slice(0,300).map(h=>`<tr>${td(esc(h.sku))}${td(esc(h.s.name),'wrapc')}${td(chip(h.best))}${td(f1(h.dTot),'n')}${td(fi(h.ss),'n')}${td(fi(h.rop),'n')}${td(fi(h.up),'n')}</tr>`);
   return head(2,'Pool the bulk of stock in one central hub','Ch. 4 p. 85, Ch. 5 pp. 113–114','The decoupling point: hold strategic stock as generic as possible and commit it to a channel as late as possible. Channel-specific steps (labelling, packaging, bundling) happen after the hub, so every channel’s safety stock sits in one pool. The website and the marketplaces (Amazon, Flipkart, Myntra) ship straight from the company warehouse, so they draw on this pool and hold no stock of their own. Whether this works depends on your products; the variable below switches the saving off if it does not.')+strip('hub')+
-  `<div class="kpis"><div class="kpi"><b>${inrC(tot.un)}</b><span>hub safety stock if each channel held its own (at COGS)</span></div><div class="kpi"><b>${inrC(tot.p)}</b><span>hub safety stock with the chosen setting</span></div><div class="kpi"><b>${inrC(tot.un-tot.p)}</b><span>inventory released</span></div></div>
-  <div class="card"><h3>Hub stock by SKU</h3>${table([['SKU'],['Name'],['Best class'],['d, units/day','n'],['σ pooled','n'],['z','n'],['Safety stock, unpooled','n'],['Safety stock, hub','n'],['Saving, units','n'],['Saving, ₹ COGS','n'],['Hub reorder point','n'],['Hub order-up-to','n']],rows)}
-  <p class="mute small">Reorder point = d × hub lead time + safety stock. Order-up-to adds the production cycle. Cycle stock from batch sizes is not modelled. Pooling saving assumes the correlation variable above; a promotion across all channels at once raises it.</p></div>`;
+  `  <div class="card"><h3>Hub stock by SKU</h3>${table([['SKU'],['Name'],['Best class'],['Sold / day','n'],['Safety stock','n'],['Reorder point','n'],['Order-up-to','n']],rows)}
+  <p class="mute small">Reorder point = d × hub lead time + safety stock. Order-up-to adds the production cycle. Cycle stock from batch sizes is not modelled.</p></div>`;
 }
 function bulkCard(){
   const rs=M.rows.filter(r=>r.bulk&&r.units>0&&r.z!=null).sort((a,b)=>b.units-a.units).slice(0,300);
@@ -749,7 +741,7 @@ function rProdInv(){
   const sum=a=>a.reduce((o,x)=>({on:o.on+x.on,tr:o.tr+x.tr,val:o.val+x.val}),{on:0,tr:0,val:0}),O=sum(own),Pl=sum(plat);
   const pd=P.pTot/P.N,dd=P.dTot/P.N;
   const lr=P.loc.sort((a,b)=>b.val-a.val).map(x=>`<tr>${td(esc(x.node))}${td(x.owner)}${td(fi(x.on),'n')}${td(fi(x.tr),'n')}${td(inr(x.val),'n')}</tr>`);
-  const sr=P.rows.slice(0,300).map(o=>`<tr>${td(esc(o.sku))}${td(esc(o.s.name),'wrapc')}${td(o.hasP?f1(o.p):'–','n')}${td(f1(o.d),'n')}${td(o.hasP?(o.net>=0?'+':'')+f1(o.net):'–','n')}${td(fi(o.hubOn),'n')}${td(fi(o.hubTr),'n')}${td(fi(o.oth),'n')}${td(fi(o.total),'n')}${td(isFinite(o.doc)?f1(o.doc):'–','n')}${td(isFinite(o.out)&&o.net<0?dayStr(Math.floor(P.end+o.out)):'–','n')}${td(`<span class="${o.status==='Falling'?'bad':o.status==='Building'?'ok':'mute'}">${o.status}</span>`)}</tr>`);
+  const sr=P.rows.slice(0,300).map(o=>`<tr>${td(esc(o.sku))}${td(esc(o.s.name),'wrapc')}${td(o.hasP?f1(o.p):'–','n')}${td(f1(o.d),'n')}${td(o.hasP?(o.net>=0?'+':'')+f1(o.net):'–','n')}${td(fi(o.hubOn),'n')}${td(fi(o.hubTr),'n')}${td(fi(o.oth),'n')}${td(fi(o.total),'n')}${td(isFinite(o.doc)?f1(o.doc):'–','n')}${td(isFinite(o.out)&&o.net<0&&o.out<=90?dayStr(Math.floor(P.end+o.out)):'–','n')}${td(`<span class="${o.status==='Falling'?'bad':o.status==='Building'?'ok':'mute'}">${o.status}</span>`)}</tr>`);
   return head8+`<div class="kpis">
    <div class="kpi"><b>${fi(O.on+O.tr)}</b><span>units the company holds (${fi(O.on)} on hand, ${fi(O.tr)} in transit)</span></div>
    <div class="kpi"><b>${inrC(O.val)}</b><span>company stock at COGS</span></div>
@@ -810,7 +802,7 @@ position = on hand + in transit</div></div>`+strip('avail');
   if(!A.has)return head7+`<div class="note">Upload a stock file (SKU, location, on hand, in transit) to see current availability.</div><div class="row"><button class="btn pri" data-act="pick" data-k="stock">Upload stock</button></div>`;
   const cl=(a,t)=>`<span class="${a*100>=t?'ok':'bad'}">${(a*100).toFixed(1)}%</span>`;
   const hr=A.hub.filter(o=>o.tg>0).sort((a,b)=>(b.tg-b.a*100)-(a.tg-a.a*100)).slice(0,300).map(o=>`<tr>${td(esc(o.sku))}${td(esc(o.s.name),'wrapc')}${td(chip(o.h.best))}${td(fi(o.pos),'n')}${td(o.has?f1(o.doc):'<span class="amber">no row</span>','n')}${td(o.tg+'%','n')}${td(cl(o.a,o.tg),'n')}${td(fi(o.gapU),'n')}${td(inr(o.gapV),'n')}${td(esc(o.direct.join(', ')),'wrapc')}</tr>`);
-  return head7+`<div class="kpis"><div class="kpi"><b>${A.hubOk}/${A.hub.length}</b><span>warehouse SKUs at target</span></div><div class="kpi"><b>${A.nodeOk}/${A.nodes.length}</b><span>store and dark-store positions at target</span></div><div class="kpi"><b>${inrC(A.gapV)}</b><span>stock (at COGS) to buy or move to reach every target</span></div><div class="kpi"><b>${fi(A.lost)}</b><span>units/month at risk from stock-outs (rough)</span></div></div>
+  return head7+`<div class="kpis"><div class="kpi"><b>${A.hubOk}/${A.hub.length}</b><span>warehouse SKUs at target</span></div><div class="kpi"><b>${A.nodeOk}/${A.nodes.length}</b><span>store and dark-store positions at target</span></div><div class="kpi"><b>${inrC(A.gapV)}</b><span>stock (at COGS) to buy or move to reach every target</span></div></div>
   <div class="card"><div class="row"><h3>Company warehouse, by SKU</h3><span class="spacer"></span><button class="btn" data-act="expAvail">Export CSV</button></div>${table([['SKU'],['Name'],['Best class'],['Position','n'],['Days of cover','n'],['Target','n'],['Availability now','n'],['Units to target','n'],['Cost to target','n'],['Serves directly']],hr,'No SKUs with a target.')}</div>
   ${A.hidden?`<div class="note">${A.hidden} quick-commerce positions are left out because their stock is not visible to us.</div>`:''}
   <div class="note">Read this as “the share of lead-time cycles with no stock-out”, not as fill rate. It assumes demand is roughly normal, lead time is fixed, and node and warehouse shortfalls are independent (so the end-to-end figure is a product, which is conservative). Lead times and σ come from your variables and order history.</div>`;
@@ -986,23 +978,23 @@ function rOverview(){
   const own=P.loc.filter(x=>x.owner==='Company'),ov=own.reduce((a,x)=>a+x.val,0);
   const dailyCogs=[...M.hub.values()].reduce((a,h)=>a+h.dTot*(isFinite(h.s.cogs)?h.s.cogs:0),0);
   const hubQ=T.hubTrig.reduce((a,h)=>a+h.qty,0),hubV=T.hubTrig.reduce((a,h)=>a+h.qty*(isFinite(h.s.cogs)?h.s.cogs:0),0);
-  const pool=[...M.hub.values()].reduce((a,h)=>a+h.saveV,0);
   const aShare=A.has&&A.hub.length?A.hubOk/A.hub.length:1;
   let h=freshBanner();
+  const SH=short14(),shU=SH.reduce((a,o)=>a+o.sh,0);
   h+=`<section class="tiles">
+   ${tile(SH.length?'red':'grn','Short in the next 14 days',fi(shU),S.stock.length?`units across ${SH.length} SKUs that company stock won't cover before a new batch can land.`:'Needs a stock file.','today')}
    ${tile(T.hubTrig.length?'red':'grn','Make or buy now',fi(T.hubTrig.length),T.has?`SKUs at or below the warehouse reorder point. ${fi(hubQ)} units, ${inrC(hubV)} at COGS.`:'Needs a stock file.','today')}
    ${tile(T.short>0?'red':T.refill.length?'amb':'grn','Store refills due',fi(T.refill.length),T.has?`store and dark-store items to send today. ${T.short>0?fi(T.short)+' units the warehouse cannot cover.':'The warehouse can cover all of them.'}`:'Needs a stock file.','today')}
    ${tile(aShare>=.9?'grn':aShare>=.7?'amb':'red','Availability on target',A.has?`${A.hubOk}/${A.hub.length}`:'–',A.has?`warehouse SKUs at target; ${A.nodeOk}/${A.nodes.length} store and dark-store items. ${inrC(A.gapV)} of stock closes every gap.`:'Needs a stock file.','avail')}
    ${tile(E.v>ov*.15?'red':E.v>0?'amb':'grn','Cash stuck above max',inrC(E.v),`at COGS, stock above its order-up-to level or not selling. This is the working-capital side.`,'today')}
-   ${tile('blu','Company stock',inrC(ov),`at COGS, about ${dailyCogs>0?Math.round(ov/dailyCogs):'–'} days of sales. Pooling at the hub saves ${inrC(pool)} of safety stock.`,'hub')}
-   ${tile('blu','Contribution a month',inrC(M.totalContrib),`after channel costs, last ${V.W} days run-rate. ${M.rows.filter(r=>r.cls==='X').length} listings lose money.`,'mix')}
+   ${tile('blu','Company stock',inrC(ov),`at COGS, about ${dailyCogs>0?Math.round(ov/dailyCogs):'–'} days of sales.`,'hub')}
   </section>`;
-  h+=`<div class="charts">${chStockHealth()}${chContribByChannel()}${chStockByLoc()}${chExcess()}</div>`;
+  const chartsH=`<div class="charts">${chStockHealth()}${chStockByLoc()}${chExcess()}</div>`;
   // flow
   const loc=P.loc,sum=f=>loc.filter(f).reduce((a,x)=>a+x.on,0),hub=loc.find(x=>x.node==='Hub')||{on:0,tr:0};
   const chT=new Map(S.channels.map(c=>[c.name,c.type]));
   const dir=M.rows.filter(r=>!M.nodeKeys.has(r.key)).reduce((a,r)=>a+r.d,0),stD=M.nodes.filter(n=>chT.get(n.ch)==='Retail store').reduce((a,n)=>a+n.d,0),qcD=M.rows.filter(r=>r.chO.type==='Quick commerce').reduce((a,r)=>a+r.d,0);
-  h+=`<section class="card"><div class="row"><h2>Where the stock is</h2><span class="mute small">units on hand, and what each part sells a day</span></div>
+  const flowH=`<section class="card"><div class="row"><h2>Where the stock is</h2><span class="mute small">units on hand, and what each part sells a day</span></div>
    <div class="flow">
     <div class="node"><span class="nm">In production / transit</span><b>${fi(hub.tr)}</b><span class="small mute">${P.hasP?f1(P.pTot/P.N)+' made a day':'no production log'}</span></div>
     <div class="arrow"><span>→</span><span>${V.hubL} days</span></div>
@@ -1015,33 +1007,38 @@ function rOverview(){
     </div></div></section>`;
   // attention
   const att=[];
+  SH.slice(0,5).forEach(o=>att.push(['red',`<b>${fi(o.sh)}</b> short of ${esc(o.h.sku)} ${esc(o.h.s.name)} in the next 14 days (${f1(o.cover)} days of cover)`,'today']));
   T.hubTrig.slice(0,5).forEach(x=>att.push(['red',`Make <b>${fi(x.qty)}</b> of ${esc(x.sku)} ${esc(x.s.name)} (class ${x.best}, ${f1(x.doc)} days of cover)`,'today']));
   T.refill.filter(o=>o.short>0).slice(0,3).forEach(o=>att.push(['red',`${esc(o.ch)} is ${fi(o.short)} short of ${esc(o.sku)}: the warehouse can't cover it`,'today']));
   S.events.forEach(ev=>{const c=evCalc(ev);if(c.hasStock&&c.shortS>0)att.push(['red',`${esc(ev.name)}: hold. ${fi(c.shortU)} units short at the hub across ${c.shortS} SKUs`,'ahead']);else if(c.n&&c.delta<=0)att.push(['amb',`${esc(ev.name)} loses ${inrC(-c.delta)} of contribution at a ${ev.disc}% extra discount`,'ahead']);});
-  E.rows.slice(0,3).forEach(o=>att.push(['amb',`${inrC(o.v)} stuck in ${esc(o.sku)} at ${esc(o.loc)} (${o.why.toLowerCase()})`,'today']));
   const xs=M.rows.filter(r=>r.cls==='X').length;if(xs)att.push(['amb',`${xs} listings have negative contribution: reprice or delist`,'mix']);
   h+=`<section class="card"><h2>Needs attention</h2>${att.length?`<ul class="att">${att.map(([c,t,g])=>`<li><span class="dot ${c}"></span><span>${t}</span><a href="#${g}" data-go="${g}" class="small">Open</a></li>`).join('')}</ul>`:'<p>Nothing urgent.</p>'}</section>`;
+  h+=chartsH+flowH;
   return h;
 }
 
+// units company stock (warehouse + in transit + stores) won't cover over the next 14 days, worst first
+function short14(){if(!S.stock.length)return [];const own=new Map();S.stock.forEach(x=>{const c=S.channels.find(c=>c.name===x.node);if(x.node==='Hub'||(c&&c.type==='Retail store'))own.set(x.sku,(own.get(x.sku)||0)+x.onhand+x.transit);});
+  const out=[];M.hub.forEach(h=>{if(h.dTot<=0)return;const p=own.get(h.sku)||0,sh=Math.ceil(h.dTot*14-p);if(sh>0)out.push({h,sh,cover:p/h.dTot});});return out.sort((a,b)=>b.sh-a.sh);}
+document.addEventListener('click',e=>{if(e.target.closest('[data-act=exAll]')){UI.exAll=!UI.exAll;render();}});
 /* ================= DECISIONS: other tabs ================= */
 function rToday(){
   const E=excessCalc();const top=runCard()+chCover();
-  const ex=E.rows.slice(0,200).map(o=>`<tr>${td(esc(o.sku))}${td(esc(o.s.name||''),'wrapc')}${td(esc(o.loc))}${td(f1(o.d),'n')}${td(fi(o.pos),'n')}${td(o.up?fi(o.up):'–','n')}${td(fi(o.ex),'n')}${td(inr(o.v),'n')}${td(esc(o.why))}</tr>`);
-  return top+rTower()+chExcess()+`<div class="card"><div class="row"><h3>Too much stock: cash to free</h3><span class="spacer"></span><button class="btn" data-act="expExcess">Export CSV</button></div>
+  const exN=UI.exAll?200:15,ex=E.rows.slice(0,exN).map(o=>`<tr>${td(esc(o.sku))}${td(esc(o.s.name||''),'wrapc')}${td(esc(o.loc))}${td(f1(o.d),'n')}${td(fi(o.pos),'n')}${td(o.up?fi(o.up):'–','n')}${td(fi(o.ex),'n')}${td(inr(o.v),'n')}${td(esc(o.why))}</tr>`);
+  return top+rTower()+`<div class="card"><div class="row"><h3>Too much stock: cash to free</h3><span class="spacer"></span><button class="btn" data-act="expExcess">Export CSV</button></div>
    <p class="mute small">Stock above its order-up-to level, stock with no sales in ${V.W} days, and store stock of items that are not shelf (A) items there. Pause production of these, push them on the channel that sells them best, or pull store stock back to the warehouse. Total ${inrC(E.v)} at COGS.</p>
-   ${table([['SKU'],['Name'],['Location'],['Sold / day','n'],['Position','n'],['Order-up-to','n'],['Excess units','n'],['Excess at COGS','n'],['Why']],ex,'Nothing is above its max level.')}</div>`;
+   ${table([['SKU'],['Name'],['Location'],['Sold / day','n'],['Position','n'],['Order-up-to','n'],['Excess units','n'],['Excess at COGS','n'],['Why']],ex,'Nothing is above its max level.')}${E.rows.length>15?`<div class="row"><button class="btn" data-act="exAll">${UI.exAll?'Show top 15':'Show all '+E.rows.length}</button></div>`:''}</div>`;
 }
 function rStoresDecide(){
   return chStores()+rStores()+bulkCard();
 }
 function rMix(){
-  const tot=S.channels.map(c=>{const r=M.rows.filter(x=>x.ch===c.name&&x.ok);const u=r.reduce((a,x)=>a+x.units,0);if(!u)return null;
+  const tot=S.channels.filter(c=>c.conf).map(c=>{const r=M.rows.filter(x=>x.ch===c.name&&x.ok);const u=r.reduce((a,x)=>a+x.units,0);if(!u)return null;
     const nr=r.reduce((a,x)=>a+x.units*x.e.NR,0),gm=r.reduce((a,x)=>a+x.units*x.e.gm,0),cm=r.reduce((a,x)=>a+x.units*x.cm,0);return {c,u,gmp:gm/nr,cmp:cm/nr,cm,cmu:cm/u};}).filter(Boolean);
   const tr=tot.map(o=>`<tr>${td(esc(o.c.name))}${td(esc(o.c.type))}${td(fi(o.u),'n')}${td(pc(o.gmp),'n')}${td(pc(o.cmp),'n')}${td(inr(o.cmu),'n')}${td(inrC(o.cm),'n')}</tr>`);
-  return chListings()+rListings()+rSegment()+`<div class="card"><h3>Margin by channel, weighted by units sold</h3>${table([['Channel'],['Type'],['Units / month','n'],['GM %','n'],['CM %','n'],['CM per unit','n'],['Contribution / month','n']],tr,'No orders loaded.')}<p class="mute small">Cost terms behind these numbers are on the data desk (Channel costs).</p></div>`;
+  return rListings()+rSegment()+`<div class="card"><h3>Margin by channel</h3>${tr.length?table([['Channel'],['Type'],['Units / month','n'],['GM %','n'],['CM %','n'],['CM per unit','n'],['Contribution / month','n']],tr):''}<p class="mute small">${tr.length?'Only channels whose cost terms finance has confirmed. ':''}Margins stay hidden for a channel until finance confirms its cost terms (Data desk → Channel costs). Until then its listings are classed on volume alone.</p></div>`;
 }
-function rHubProd(){return `<div class="note">Channel correlation ${V.rhoAuto?'measured from orders':'typed'}: <b>${f2(M.rhoW)}</b> (demand-weighted). ${V.rhoAuto?'0 means channels cancel out, 1 means they move together.':'Switch “Measure correlation from orders” on under Planning rules.'} Lead-time swing in safety stock: <b>${V.hubLsd} days</b>.</div>`+rHub()+rProdInv();}
+function rHubProd(){return rHub()+rProdInv();}
 function rSurgesView(){
   const head5=head(5,'Upcoming sales and promotions','Ch. 7 pp. 155–156','Marketplace sale events and quick-commerce promotions create the same distortion. Do not run a promotion without a stock commitment from the hub. Each event is checked twice: can the hub cover the extra units without eating its safety stock, and does the promotion add contribution after the deeper discount.')+strip('surges');
   if(!M.has)return head5+noData();
@@ -1163,12 +1160,6 @@ function chStockHealth(){
     lg([[COL.red,`Runs out first (${H.red} / ${N.red})`],[COL.amb,`Into safety stock (${H.amb} / ${N.amb})`],[COL.grn,`Healthy (${H.grn} / ${N.grn})`],[COL.gry,`Above max (${H.gry} / ${N.gry})`]])+
     `<p class="small mute">Figures in brackets: warehouse / stores. Red and amber need action today; grey is working capital you could free.</p>`);
 }
-function chContribByChannel(){
-  const rs=M.chSum.filter(c=>c.contrib>0).sort((a,b)=>b.contrib-a.contrib);
-  if(!rs.length)return chartCard('Contribution by channel','','<p class="mute">No orders yet.</p>');
-  const top=rs.slice(0,10),rest=rs.slice(10).reduce((a,c)=>a+c.contrib,0);if(rest>0)top.push({name:'All other stores',contrib:rest,units:0});
-  return chartCard('Contribution by channel','₹ a month after channel costs',bars(top.map(c=>({l:c.name,v:c.contrib,txt:inrC(c.contrib),t:`${c.name}: ${inrC(c.contrib)} a month`})),{aria:'Contribution by channel'}));
-}
 function chStockByLoc(){
   const P=prodCalc();const ls=P.loc.filter(x=>x.val>0).sort((a,b)=>b.val-a.val);if(!ls.length)return '';
   const top=ls.slice(0,10),rest=ls.slice(10).reduce((a,x)=>a+x.val,0);
@@ -1199,13 +1190,6 @@ function chStores(){
   return chartCard('Stores: stock held and refills due','bar = stock at COGS; colour = share of shelf items at or below reorder point',bars(rs.map(o=>{const sh=o.nodes.length?o.below/o.nodes.length:0;return {l:o.s.ch.replace(/^Store /,''),v:o.val,c:sh>=.5?COL.red:sh>0?COL.amb:COL.grn,txt:`${inrC(o.val)} · ${o.below}/${o.nodes.length||0}`,t:`${o.s.ch}: ${inrC(o.val)}, ${o.below} of ${o.nodes.length} shelf items need a refill, ${f1(o.doc)} days of cover`};}),{aria:'Stores'})+
    lg([[COL.red,'Half or more shelf items need refill'],[COL.amb,'Some need refill'],[COL.grn,'All above reorder point']])+`<p class="small mute">Right-hand figure: items needing refill / shelf (A) items.</p>`);
 }
-function chListings(){
-  const chs=S.channels.map(c=>{const L=listingsFor(c.name);return {c,L};}).filter(o=>o.L.length);
-  if(!chs.length)return '';
-  const k=['A','B','C','X','0','?'];
-  return chartCard('SKUs on each marketplace','listings by class',bars(chs.sort((a,b)=>b.L.length-a.L.length).map(o=>{const n={};o.L.forEach(x=>n[x.cls]=(n[x.cls]||0)+1);return {l:o.c.name,segs:k.map(c=>[n[c]||0,CLSCOL[c],`${n[c]||0} class ${c}`]),txt:fi(o.L.length)};}),{aria:'Listings by channel and class'})+
-   lg([[CLSCOL.A,'A high volume + margin'],[CLSCOL.B,'B'],[CLSCOL.C,'C low on both'],[CLSCOL.X,'X loses money'],['var(--line)','0 / ? listed, no sales or no cost']]));
-}
 
 /* ================= SKUs listed on each marketplace ================= */
 function listingsFor(ch){
@@ -1221,7 +1205,7 @@ function rListings(){
   const L=listingsFor(UI.lch).sort((a,b)=>(b.r?b.r.units:-1)-(a.r?a.r.units:-1));
   const q=(UI.lq||'').toLowerCase(),fl=L.filter(x=>(UI.lcls==='All'||!UI.lcls||x.cls===UI.lcls)&&(!q||(x.sku+' '+x.s.name+' '+(x.s.cat||'')).toLowerCase().includes(q)));
   const hasFile=(S.listings||[]).length>0;
-  const rows=fl.slice(0,500).map(x=>{const r=x.r;return `<tr>${td(esc(x.sku))}${td(esc(x.s.name),'wrapc')}${td(esc(x.s.cat||''))}${td(chip(x.cls))}${td(r?f1(r.units):'0','n')}${td(r?inr(r.price):'–','n')}${td(r?inr(r.cm):'–','n')}${td(r?pc(r.cmPct):'–','n')}${td(r?inrC(r.contrib):'–','n')}${td(r&&r.oos?r.oos:'–','n')}${td(r?esc(r.place):'<span class="amber">Listed but sold nothing in '+V.W+' days: review</span>','wrapc')}</tr>`;});
+  const rows=fl.slice(0,500).map(x=>{const r=x.r;return `<tr>${td(esc(x.sku))}${td(esc(x.s.name),'wrapc')}${td(esc(x.s.cat||''))}${td(chip(x.cls))}${td(r?f1(r.units):'0','n')}${td(r?inr(r.price):'–','n')}${td(r&&r.chO.conf?inr(r.cm):'–','n')}${td(r&&r.chO.conf?pc(r.cmPct):'–','n')}${td(r&&r.chO.conf?inrC(r.contrib):'–','n')}${td(r&&r.oos?r.oos:'–','n')}${td(r?esc(r.place):'<span class="amber">Listed but sold nothing in '+V.W+' days: review</span>','wrapc')}</tr>`;});
   const n={};L.forEach(x=>n[x.cls]=(n[x.cls]||0)+1);
   return `<div class="card"><div class="row"><h3>SKUs listed on each marketplace</h3><span class="spacer"></span><input id="lq" placeholder="Search SKU or name" value="${esc(UI.lq||'')}" aria-label="Search listings"><select data-f="lcls" aria-label="Class filter"><option>All</option>${['A','B','C','X','0','?'].map(k=>`<option${UI.lcls===k?' selected':''}>${k}</option>`).join('')}</select><button class="btn" data-act="expList">Export CSV</button></div>
    <div class="chips">${chs.map(o=>`<button data-lch="${esc(o.c.name)}" aria-pressed="${o.c.name===UI.lch}">${esc(o.c.name)} <span class="ct">${o.n}</span></button>`).join('')}</div>

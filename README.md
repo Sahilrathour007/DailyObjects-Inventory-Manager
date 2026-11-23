@@ -29,12 +29,12 @@ Then open http://localhost:8000. It opens with invented example data so every sc
 ### Decisions (management)
 | Tab | What it answers |
 |---|---|
-| Overview | Six headline numbers, stock health, contribution by channel, where the cash sits, biggest cash traps, and a "needs attention" list |
+| Overview | Units short in the next 14 days, make-or-buy and refill counts, availability on target, cash above max and stock held; then a "needs attention" list (worst five shortfalls first), stock health, where the cash sits and the biggest cash traps |
 | Today | Daily run sign-off (stock by 10:00, make list by 11:00, dispatch by 15:00), warehouse days of cover, refills from the warehouse, the warehouse make-or-buy list, and stock to cut |
 | Availability | Four views (warehouse, marketplaces, retail stores, dark stores) of each product's availability now vs target. Least available first; red marks products that run out before stock can land or sit 10+ points below target |
 | Stores | Stock and refills per store, store detail by SKU, and what quick commerce should keep ready for the next purchase order |
-| Products & channels | SKUs listed on each marketplace, classes by margin and volume, class overrides, and margin by channel |
-| Hub & production | Pooled safety stock, measured channel correlation, and production vs sales per day |
+| Products & channels | SKUs listed on each marketplace, classes and class overrides, and margin by channel for channels whose cost terms finance has confirmed |
+| Hub & production | Warehouse safety stock, reorder point and order-up-to per SKU, and production vs sales per day |
 | Sales & next month | Stock and profit check for each sale event, plus next month's production by family, net of stock held |
 
 ### Data desk (the people who maintain the data)
@@ -87,6 +87,7 @@ Availability now:    Φ((position − d · L) ÷ (σ · √L)); for stores, stor
 Classes are set per SKU on each channel. **A** is high volume and high contribution margin. **B** is one of the two. **C** is neither. **X** loses money. **0** has no sales. **?** is missing MRP or COGS.
 - Volume is judged within each channel, so Amazon and Myntra aren't compared on the same scale.
 - Margin is contribution after GST, discount, commission, delivery, packing, returns, ads and store costs.
+- Margin is judged only on channels whose cost terms finance has confirmed. On other channels, listings are classed on volume alone: top 30% A, next 35% B, the rest C.
 - Targets: A 99%, B 97%, C 90%. Products missing costs are planned at the A target until costs are added. Money-losing products are planned at the C target.
 
 ## Known limits
